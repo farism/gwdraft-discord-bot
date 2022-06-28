@@ -1,0 +1,7 @@
+node_modules/
+packages/web
+dist/
+build/
+.DS_Store
+*.log
+gwdraft-firebase-key.json

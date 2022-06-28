@@ -10,5 +10,6 @@
     "target": "ES2015",
     "sourceMap": true,
     "strict": true
-  }
+  },
+  "include": ["src/**/*.ts"]
 }

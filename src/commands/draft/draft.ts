@@ -16,7 +16,8 @@ import {
   MessageEmbed,
   User,
 } from 'discord.js'
-import { defaultPlayerCount, allFlux } from '../../helpers/constants'
+import { getGuildSettings, players } from '../../firebase'
+import { allFlux, defaultPlayerCount } from '../../helpers/constants'
 import { parseTime } from '../../helpers/time'
 import { GuildId } from '../../types'
 
@@ -49,12 +50,13 @@ export class Draft {
   timerUpdate: NodeJS.Timer
   users: User[] = []
   readyUsers: string[] = []
+  teams: [User[], User[]] = [[], []]
 
-  constructor(interaction: CommandInteraction) {
-    const time = interaction.options.getString('time')
-    const location = interaction.options.getString('location') || 'Great Temple of Balthazar - AE1'
-    const count = interaction.options.getInteger('count') ?? defaultPlayerCount
-    const description = interaction.options.getString('description')
+  constructor(i: CommandInteraction) {
+    const time = i.options.getString('time')
+    const location = i.options.getString('location') ?? 'Great Temple of Balthazar - AE1'
+    const count = i.options.getInteger('count') ?? defaultPlayerCount
+    const description = i.options.getString('description')
 
     const now = new Date()
     let date = time ? zonedTimeToUtc(parseTime(time), 'Europe/Paris') : now
@@ -62,43 +64,43 @@ export class Draft {
       date = addDays(date, 1)
     }
 
-    this.interaction = interaction
+    this.interaction = i
     this.date = date
     this.location = location
     this.count = count
     this.description = description
-    this.id = nextDraftId(interaction.guildId || '')
-    this.host = interaction.user
+    this.id = nextDraftId(i.guildId || '')
+    this.host = i.user
     this.timer = setInterval(() => {
       this.notifySignup()
       this.notifyUsers()
     }, 1000)
     this.timerUpdate = setInterval(() => this.updateMessage(), 5000)
-    this.setupMessage()
+    this.initialize()
   }
 
   get signupDate() {
     return subHours(this.date, 1)
   }
 
-  get hasStarted() {
+  get isPastStartTime() {
     return new Date() > this.date
   }
 
-  get hasReachedCount() {
+  get hasAboveCount() {
     return this.usersInCount.length >= this.count
   }
 
-  get allInCountReady() {
+  get allReady() {
     return this.usersInCount.filter((u) => this.readyUsers.includes(u.id)).length === this.count
   }
 
   get canIndicateReady() {
-    return this.hasStarted && this.hasReachedCount
+    return this.isPastStartTime && this.hasAboveCount
   }
 
-  get shouldCommence() {
-    return this.hasStarted && this.hasReachedCount && this.allInCountReady
+  get shouldStart() {
+    return this.isPastStartTime && this.hasAboveCount && this.allReady
   }
 
   get usersInCount() {
@@ -122,124 +124,6 @@ export class Draft {
       zero: true,
       format,
     })
-  }
-
-  async setupMessage() {
-    const message = await this.interaction.channel?.send({
-      embeds: [this.createEmbed()],
-      components: [this.createComponents()],
-    })
-
-    if (message) {
-      const collector = message.createMessageComponentCollector({
-        dispose: true,
-        time: 24 * 60 * 60 * 1000,
-      })
-
-      collector.on('collect', async (i) => {
-        if (i.customId === 'join') {
-          if (this.isUserInDraft(i.user)) {
-            i.reply({ content: 'You have already joined the draft', ephemeral: true })
-          } else {
-            this.addUser(i.user)
-
-            i.reply({ content: 'You have joined the draft', ephemeral: true })
-          }
-        } else if (i.customId === 'leave') {
-          this.removeUser(i.user)
-
-          i.reply({ content: 'You have left the draft', ephemeral: true })
-        } else if (i.customId === 'ready') {
-          this.setReady(i.user)
-
-          i.reply({ content: 'You have indicated you are ready to play', ephemeral: true })
-        }
-      })
-
-      this.message = message
-    }
-
-    this.updateMessage()
-  }
-
-  async updateMessage() {
-    try {
-      await this.message?.edit({
-        embeds: [this.createEmbed()],
-        components: [this.createComponents()],
-      })
-    } catch (e) {
-      console.log(e)
-    }
-  }
-
-  createComponents() {
-    const row = new MessageActionRow()
-
-    row.addComponents(
-      new MessageButton()
-        .setCustomId('ready')
-        .setLabel('Ready')
-        .setStyle('SUCCESS')
-        .setDisabled(!this.canIndicateReady),
-    )
-
-    row.addComponents(
-      new MessageButton()
-        .setCustomId('join')
-        .setLabel('Join')
-        .setStyle(this.countdown > 0 ? 'SECONDARY' : 'PRIMARY')
-        .setDisabled(this.countdown > 0),
-      new MessageButton()
-        .setCustomId('leave')
-        .setLabel('Leave')
-        .setStyle('SECONDARY')
-        .setDisabled(this.countdown > 0),
-    )
-
-    return row
-  }
-
-  createEmbed() {
-    const time = Math.floor(this.date.getTime() / 1000)
-
-    const month = format(new Date(), 'MMMM')
-
-    const flux = allFlux[this.date.getMonth()]
-
-    const divider = (i: number) => (i === this.count ? '-----\n' : '')
-
-    const signups =
-      this.users.length === 0
-        ? 'None'
-        : this.users
-            .map((user, i) => `${divider(i)}${i + 1}. <@${user.id}> ${this.formatReady(user)}`)
-            .join('\n')
-
-    const embed = new MessageEmbed()
-
-    embed
-      .setTitle(`Draft #${this.id}`)
-      .addField('Start Time', this.hasStarted ? 'In Progress' : `<t:${time}>`)
-
-    if (this.countdown > 0) {
-      embed.addField('Sign-ups Start In', this.countdownFormatted)
-    }
-
-    embed.addField('Meeting Location', this.location)
-
-    if (this.description) {
-      embed.addField('Description', this.description)
-    }
-
-    embed
-      .addField('Player Count', String(this.count))
-      .addField(`${month} Flux - ${flux.name}`, `${flux.description} [wiki](${flux.link})`)
-      .addField('Bans', `No bans`)
-      .addField('Host', `<@${this.host.id}>`)
-      .addField('Signups', `${signups}`)
-
-    return embed
   }
 
   formatReady(user: User) {
@@ -266,6 +150,156 @@ export class Draft {
     return this.users.findIndex((u) => u.id === user.id) >= 0
   }
 
+  isUserInCount(user: User) {
+    return !!this.usersInCount.find((u) => u.id === user.id)
+  }
+
+  isUserOnTeam(user: User, team: number) {
+    return !!this.teams[team].find((u) => u.id === user.id)
+  }
+
+  isUserCaptain(user: User) {
+    console.log(this.teams[0][0]?.id === user.id, this.teams[1][0]?.id === user.id)
+    return this.teams[0][0]?.id === user.id || this.teams[1][0]?.id === user.id
+  }
+
+  isUserReady(user: User) {
+    return this.readyUsers.includes(user.id)
+  }
+
+  async initialize() {
+    const embed = await this.createEmbed()
+
+    const message = await this.interaction.channel?.send({
+      embeds: [embed],
+      components: [this.createComponents()],
+    })
+
+    if (message) {
+      const collector = message.createMessageComponentCollector({
+        dispose: true,
+        time: 24 * 60 * 60 * 1000,
+      })
+
+      collector.on('collect', async (i) => {
+        if (i.customId === 'join') {
+          if (this.isUserInDraft(i.user)) {
+            i.reply({ content: 'You have already joined the draft', ephemeral: true })
+          } else {
+            this.addUser(i.user)
+
+            i.reply({ content: 'You have joined the draft', ephemeral: true })
+          }
+        } else if (i.customId === 'leave') {
+          this.removeUser(i.user)
+
+          i.reply({ content: 'You have left the draft', ephemeral: true })
+        } else if (i.customId === 'ready') {
+          this.toggleReady(i.user)
+
+          i.reply({ content: 'You have changed your ready status', ephemeral: true })
+        }
+      })
+
+      this.message = message
+    }
+
+    this.updateMessage()
+  }
+
+  async updateMessage() {
+    try {
+      if (this.message?.editable) {
+        const embed = await this.createEmbed()
+
+        await this.message?.edit({
+          embeds: [embed],
+          components: [this.createComponents()],
+        })
+      }
+    } catch (e) {
+      console.log(e)
+    }
+  }
+
+  createComponents() {
+    const row = new MessageActionRow()
+
+    row.addComponents(
+      new MessageButton()
+        .setCustomId('ready')
+        .setLabel('Ready')
+        .setStyle('SUCCESS')
+        .setEmoji('✅')
+        .setDisabled(!this.canIndicateReady),
+    )
+
+    row.addComponents(
+      new MessageButton()
+        .setCustomId('join')
+        .setLabel('Join')
+        .setStyle(this.countdown > 0 ? 'SECONDARY' : 'PRIMARY')
+        .setDisabled(this.countdown > 0),
+      new MessageButton()
+        .setCustomId('leave')
+        .setLabel('Leave')
+        .setStyle('SECONDARY')
+        .setDisabled(this.countdown > 0),
+    )
+
+    return row
+  }
+
+  async createEmbed() {
+    const time = Math.floor(this.date.getTime() / 1000)
+
+    const month = format(new Date(), 'MMMM')
+
+    const flux = allFlux[this.date.getMonth()]
+
+    const divider = (i: number) => (i === this.count ? '-----\n' : '')
+
+    const signups: string[] = []
+
+    for (const [i, user] of this.users.entries()) {
+      const doc = await (await players.doc(user.id).get()).data()
+
+      const ign = doc?.ign ?? ''
+
+      signups.push(`${divider(i)}${i + 1}. <@${user.id}> ${this.formatReady(user)} (${ign})`)
+    }
+
+    const embed = new MessageEmbed()
+
+    embed
+      .setTitle(`Draft #${this.id}`)
+      .addField('Start Time', this.isPastStartTime ? 'In Progress' : `<t:${time}>`)
+
+    if (this.countdown > 0) {
+      embed.addField('Sign-ups Start In', this.countdownFormatted)
+    }
+
+    embed.addField('Meeting Location', this.location)
+
+    if (this.description) {
+      embed.addField('Description', this.description)
+    }
+
+    const team1 = this.teams[0].map((u, i) => `${i + 1}. ${u.username}`).join('\n') || 'None'
+
+    const team2 = this.teams[1].map((u, i) => `${i + 1}. ${u.username}`).join('\n') || 'None'
+
+    embed
+      .addField('Player Count', String(this.count))
+      .addField(`${month} Flux - ${flux.name}`, `${flux.description} [wiki](${flux.link})`)
+      .addField('Host', `<@${this.host.id}>`)
+      .addField('Signups', `${signups.length ? signups.join('\n') : 'None'}`)
+      .addField('Team 1', team1, true)
+      .addField('Team 2', team2, true)
+
+    return embed
+  }
+
   async addUser(user: User) {
     if (!this.isUserInDraft(user)) {
       this.users = [...this.users, user]
@@ -279,10 +313,14 @@ export class Draft {
 
     this.readyUsers = this.readyUsers.filter((id) => id != user.id)
 
+    this.removeUserFromTeam(user, 0)
+
+    this.removeUserFromTeam(user, 1)
+
     this.updateMessage()
   }
 
-  async moveUser(user: User, position: number) {
+  async reorderUser(user: User, position: number) {
     this.users = this.users.filter((u) => u.id !== user.id)
 
     this.users.splice(position, 0, user)
@@ -290,12 +328,76 @@ export class Draft {
     this.updateMessage()
   }
 
-  async setReady(user: User) {
-    if (this.isUserInDraft(user)) {
-      this.readyUsers = [...this.readyUsers, user.id]
-
-      this.updateMessage()
+  async setTeamCaptain(user: User, team: number) {
+    if (this.isUserInCount(user)) {
+      this.teams[team].unshift(user)
     }
+
+    this.updateMessage()
+  }
+
+  async addUserToTeam(user: User, team: number) {
+    if (this.isUserInCount(user) && !this.isUserOnTeam(user, team)) {
+      this.teams[team].push(user)
+    }
+
+    this.updateMessage()
+  }
+
+  async removeUserFromTeam(user: User, team: number) {
+    this.teams[team] = this.teams[team].filter((u) => u.id !== user.id)
+
+    this.updateMessage()
+  }
+
+  async moveUserToBackOfQueue(user: User) {
+    this.users = this.users.filter((u) => u.id !== user.id)
+
+    this.users.push(user)
+
+    this.updateMessage()
+  }
+
+  async swapUserTeam(user: User) {
+    if (this.isUserOnTeam(user, 0)) {
+      this.removeUserFromTeam(user, 0)
+      this.addUserToTeam(user, 1)
+    } else if (this.isUserOnTeam(user, 1)) {
+      this.removeUserFromTeam(user, 1)
+      this.addUserToTeam(user, 0)
+    }
+
+    this.updateMessage()
+  }
+
+  async addUserToCaptainsTeam(captain: User, user: User) {
+    if (this.isUserOnTeam(captain, 0)) {
+      this.addUserToTeam(user, 0)
+    } else if (this.isUserOnTeam(captain, 1)) {
+      this.addUserToTeam(user, 1)
+    }
+
+    this.updateMessage()
+  }
+
+  async removeUserFromCaptainsTeam(captain: User, user: User) {
+    if (this.isUserOnTeam(captain, 0)) {
+      this.removeUserFromTeam(user, 0)
+    } else if (this.isUserOnTeam(captain, 1)) {
+      this.removeUserFromTeam(user, 1)
+    }
+
+    this.updateMessage()
+  }
+
+  async toggleReady(user: User) {
+    if (this.readyUsers.includes(user.id)) {
+      this.readyUsers = this.readyUsers.filter((id) => id !== user.id)
+    } else {
+      this.readyUsers = [...this.readyUsers, user.id]
+    }
+
+    this.updateMessage()
   }
 
   async notifySignup() {
@@ -303,15 +405,21 @@ export class Draft {
       return
     }
 
-    this.hasSentSignupPing = true
+    const guildSettings = await getGuildSettings(this.interaction)
 
-    this.signupMessage = await this.message?.channel.send(
-      `Draft starting, sign up now! <@&996939663598166086>`,
-    )
+    if (guildSettings?.draft_player_role) {
+      this.signupMessage = await this.message?.channel.send(
+        `Draft starting, sign up now! <@&${guildSettings.draft_player_role}>`,
+      )
+
+      this.hasSentSignupPing = true
+    }
   }
 
   async notifyUsers() {
-    if (this.shouldCommence) {
+    const guildSettings = await getGuildSettings(this.interaction)
+
+    if (this.shouldStart) {
       this.usersInCount.forEach((u) => {
         if (!this.isUserNotifiedOReady(u)) {
           this.usersNotifiedOfReady.push(u.id)
@@ -323,7 +431,7 @@ export class Draft {
           ).then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
         }
       })
-    } else if (this.hasReachedCount) {
+    } else if (this.isPastStartTime && this.hasAboveCount) {
       this.usersInCount.forEach((u) => {
         if (!this.isUserNotifiedOfCount(u)) {
           this.usersNotifiedOfCount.push(u.id)
@@ -331,6 +439,12 @@ export class Draft {
           u.send(
             [`The draft has enough players, please indicate if you are ready to play`].join('\n\n'),
           ).then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
+
+          setTimeout(() => {
+            if (!this.isUserReady(u)) {
+              this.moveUserToBackOfQueue(u)
+            }
+          }, parseInt(guildSettings?.ready_wait_time ?? '5', 10) * 60 * 1000)
         }
       })
     }
@@ -347,5 +461,11 @@ export class Draft {
     await this.signupMessage?.delete()
 
     await this.message?.delete()
+  }
+
+  async start() {
+    this.readyUsers = []
+
+    this.updateMessage()
   }
 }

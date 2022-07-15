@@ -24,6 +24,8 @@ export type Rankings = {
 export type Professions = keyof typeof Profession
 
 export interface Player {
+  wins: number
+  losses: number
   preferences: Profession[]
   rankings: {
     [k: GuildId]: Rankings

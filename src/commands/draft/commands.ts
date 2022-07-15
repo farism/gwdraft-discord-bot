@@ -5,8 +5,8 @@ export const draftCmd = new SlashCommandBuilder()
   .setDescription(`Manage drafts`)
   .addSubcommand((subcommand) =>
     subcommand
-      .setName('start')
-      .setDescription('Start a draft now, or at the specified time')
+      .setName('create')
+      .setDescription('Create a draft')
       .addStringOption((option) =>
         // prettier-ignore
         option
@@ -33,11 +33,11 @@ export const draftCmd = new SlashCommandBuilder()
       ),
   )
   .addSubcommand((subcommand) =>
-    subcommand.setName('commence').setDescription('Begin the draft once all players are ready'),
+    subcommand.setName('start').setDescription('Begin the draft once all players are ready'),
   )
   .addSubcommand((subcommand) =>
     subcommand
-      .setName('addplayer')
+      .setName('add_player')
       .setDescription('Manually add a player to the draft')
       .addUserOption((option) =>
         // prettier-ignore
@@ -49,7 +49,7 @@ export const draftCmd = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
-      .setName('removeplayer')
+      .setName('remove_player')
       .setDescription('Manually remove a player from the draft')
       .addUserOption((option) =>
         // prettier-ignore
@@ -61,7 +61,7 @@ export const draftCmd = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
-      .setName('moveplayer')
+      .setName('reorder_player')
       .setDescription('Move player order in the count')
       .addUserOption((option) =>
         // prettier-ignore
@@ -82,6 +82,12 @@ export const draftCmd = new SlashCommandBuilder()
     subcommand
       .setName('edit')
       .setDescription('Edit the active draft')
+      .addUserOption((option) =>
+        // prettier-ignore
+        option
+          .setName('host')
+          .setDescription('The new draft host'),
+      )
       .addStringOption((option) =>
         // prettier-ignore
         option
@@ -93,6 +99,17 @@ export const draftCmd = new SlashCommandBuilder()
         option
           .setName('description')
           .setDescription('Adds a description to the draft'),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName('winner')
+      .setDescription('Record the winning team of the last game')
+      .addIntegerOption((option) =>
+        // prettier-ignore
+        option
+          .setName('team')
+          .setDescription('The winning team'),
       ),
   )
   .addSubcommand((subcommand) =>

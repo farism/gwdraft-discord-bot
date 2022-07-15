@@ -1,77 +1,122 @@
-import { CommandInteraction } from 'discord.js'
+import { CommandInteraction, User } from 'discord.js'
+import { addLossToPlayer, addWinToPlayer, getGuildSettings } from '../../firebase'
 import { GuildId } from '../../types'
+import { interactionHasRole } from '../helpers'
 import { Draft } from './draft'
 
 const drafts: { [k: GuildId]: Draft } = {}
 
-export function getDraft(i: CommandInteraction, drafts: { [k: string]: Draft }) {
+export function getDraft(i: CommandInteraction) {
   if (i.guildId) {
     return drafts[i.guildId]
   }
 }
 
-export async function handleDraftStart(i: CommandInteraction) {
+export async function handleDraftCreate(i: CommandInteraction) {
   if (!i.guildId) {
     i.reply({ content: 'Invalid guild id' })
     return
   }
 
   // if (drafts[i.guildId]) {
-  //   i.reply({ content: 'Active draft exists' })
+  //   i.reply({ content: 'Active already draft exists. You may need to cancel it first.' })
   //   return
   // }
 
-  await i.reply({ content: `<@${i.user.id}> has started a draft` })
+  const guildSettings = await getGuildSettings(i)
 
-  drafts[i.guildId] = new Draft(i)
+  const userHasRole = guildSettings?.draft_moderator_role
+    ? interactionHasRole(i, guildSettings?.draft_moderator_role || '')
+    : true
+
+  const isInDraftChannel = guildSettings?.draft_channel
+    ? guildSettings.draft_channel === i.channel?.id
+    : true
+
+  if (!userHasRole) {
+    await i.reply({
+      content: `You do not have the <@&${guildSettings?.draft_moderator_role}> role`,
+      ephemeral: true,
+    })
+  } else if (!isInDraftChannel) {
+    await i.reply({
+      content: `Invalid channel, please use <#${guildSettings?.draft_channel}>`,
+      ephemeral: true,
+    })
+  } else {
+    await i.reply({ content: `A draft has been scheduled` })
+
+    drafts[i.guildId] = new Draft(i)
+  }
 }
 
-export async function handleDraftCommence(i: CommandInteraction) {
-  if (!i.guildId) {
-    i.reply({ content: 'Invalid guild id' })
+export async function handleDraftStart(i: CommandInteraction) {
+  if (!drafts[i.guildId || 0]) {
+    i.reply({ content: 'There is no active draft', ephemeral: true })
     return
   }
 
-  if (!drafts[i.guildId]) {
-    i.reply({ content: 'There is no active draft' })
-    return
-  }
+  getDraft(i)?.start()
 
-  await i.reply({ content: `<@${i.user.id}> has started a draft` })
-
-  drafts[i.guildId] = new Draft(i)
+  await i.reply({ content: 'Draft started', ephemeral: true })
 }
 
 export async function handleDraftAddPlayer(i: CommandInteraction) {
   const user = i.options.getUser('user', true)
 
-  getDraft(i, drafts)?.addUser(user)
+  getDraft(i)?.addUser(user)
 
-  await i.reply({ content: `used /draft addplayer` })
+  await i.reply({ content: `Player added`, ephemeral: true })
 }
 
 export async function handleDraftRemovePlayer(i: CommandInteraction) {
   const user = i.options.getUser('user', true)
 
-  getDraft(i, drafts)?.removeUser(user)
+  getDraft(i)?.removeUser(user)
 
-  await i.reply({ content: i.toString() })
+  await i.reply({ content: 'Player removed', ephemeral: true })
 }
 
-export async function handleDraftMovePlayer(i: CommandInteraction) {
+export async function handleDraftReorderPlayer(i: CommandInteraction) {
   const user = i.options.getUser('user', true)
 
-  const position = Math.max(0, i.options.getInteger('position', true) - 1)
+  const position = i.options.getInteger('position', true)
 
-  getDraft(i, drafts)?.moveUser(user, position)
+  getDraft(i)?.reorderUser(user, position)
 
-  await i.reply({ content: `used /draft moveplayer` })
+  await i.reply({ content: `Player moved`, ephemeral: true })
+}
+
+export async function handleDraftWinner(i: CommandInteraction) {
+  const draft = getDraft(i)
+
+  if (draft) {
+    const team = i.options.getInteger('team', true)
+
+    if (team === 1) {
+      draft.teams[0].forEach((u) => addWinToPlayer(u.id))
+      draft.teams[1].forEach((u) => addLossToPlayer(u.id))
+    } else if (team === 2) {
+      draft.teams[0].forEach((u) => addLossToPlayer(u.id))
+      draft.teams[1].forEach((u) => addWinToPlayer(u.id))
+    }
+
+    await i.reply({ content: `Team ${team} declared the winner!` })
+  } else {
+    i.reply({ content: 'There is no active draft' })
+  }
 }
 
 export async function handleDraftEdit(i: CommandInteraction) {
-  const draft = getDraft(i, drafts)
+  const draft = getDraft(i)
 
   if (draft) {
+    const host = i.options.getUser('host')
+
+    if (host) {
+      draft.host = host
+    }
+
     const location = i.options.getString('location')
 
     if (location) {
@@ -85,7 +130,7 @@ export async function handleDraftEdit(i: CommandInteraction) {
     }
   }
 
-  await i.reply({ content: `used /draft edit` })
+  await i.reply({ content: `Draft edited`, ephemeral: true })
 }
 
 export async function handleDraftCancel(i: CommandInteraction) {
@@ -102,7 +147,7 @@ export async function handleDraftCancel(i: CommandInteraction) {
 
     delete drafts[i.guildId]
 
-    await i.reply({ content: `Canceling draft`, ephemeral: true })
+    await i.reply({ content: `Draft canceled`, ephemeral: true })
   } else {
     await i.reply({ content: `There is no active draft to cancel`, ephemeral: true })
   }

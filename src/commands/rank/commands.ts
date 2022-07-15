@@ -1,19 +1,5 @@
 import { SlashCommandBuilder } from '@discordjs/builders'
-import { CacheType, CommandInteraction } from 'discord.js'
-import { defaultRanks, players } from '../firebase'
-import { Profession, Rankings } from '../types'
-import { getProfession, getRank, getUser } from './helpers'
-
-function formatRankings(rankings: Rankings): string {
-  //   return `
-  // \`\`\`
-  // ${Object.values(Profession)
-  //   .map((p) => `${p}: ${rankings[p]}`)
-  //   .join('\n')}
-  // \`\`\`
-  //   `
-  return ''
-}
+import { Profession } from '../../types'
 
 export const professionChoices = Object.entries(Profession).map(([name, value]) => ({
   name,
@@ -139,70 +125,3 @@ export const rankCmd = new SlashCommandBuilder()
           .setRequired(true),
       ),
   )
-
-function createRankingPayload(i: CommandInteraction<CacheType>, payload: any) {
-  if (!i.guildId) {
-    return {}
-  }
-
-  return {
-    userName: getUser(i).username,
-    ranking: {
-      [i.guildId]: {
-        guildName: i.guild?.name,
-        [i.user.id]: {
-          judgeName: i.user.username,
-          ...payload,
-        },
-      },
-    },
-  }
-}
-
-export async function handleRankProfession(i: CommandInteraction<CacheType>) {
-  if (!i.guildId) {
-    return
-  }
-
-  const payload = createRankingPayload(i, { [getProfession(i)]: getRank(i) })
-
-  await players.doc(getUser(i).id).set(payload, { merge: true })
-
-  i.reply({ content: 'used /rank profession', ephemeral: true })
-}
-
-export async function handleRankAll(i: CommandInteraction<CacheType>) {
-  if (!i.guildId) {
-    return
-  }
-
-  const payload = createRankingPayload(i, defaultRanks(getRank(i)))
-
-  await players.doc(getUser(i).id).set(payload, { merge: true })
-
-  i.reply({ content: 'used /rank all', ephemeral: true })
-}
-
-export async function handleRankUtility(i: CommandInteraction<CacheType>) {
-  i.reply({ content: 'used /rank utility', ephemeral: true })
-}
-
-export async function handleRankReset(i: CommandInteraction<CacheType>) {
-  i.reply({ content: 'used /rank reset', ephemeral: true })
-}
-
-async function getRankings(i: CommandInteraction<CacheType>): Promise<Rankings> {
-  const doc = await players.doc(getUser(i).id).get()
-
-  if (i.guildId) {
-    return doc.data()?.ranking[i.guildId][i.user.id]
-  }
-
-  return {}
-}
-
-export async function handleRankView(i: CommandInteraction<CacheType>) {
-  const rankings = await getRankings(i)
-
-  i.reply({ content: formatRankings(rankings), ephemeral: true })
-}

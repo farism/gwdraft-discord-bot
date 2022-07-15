@@ -19,19 +19,3 @@ export const banCmd = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) => subcommand.setName('flux').setDescription('Ban a flux'))
   .addSubcommand((subcommand) => subcommand.setName('schedule').setDescription('Schedule bans'))
-
-export async function handleBanPlayer(i: CommandInteraction<CacheType>) {
-  i.reply({ content: 'used /ban player', ephemeral: true })
-}
-
-export async function handleBanSkill(i: CommandInteraction<CacheType>) {
-  i.reply({ content: 'used /ban skill', ephemeral: true })
-}
-
-export async function handleBanFlux(i: CommandInteraction<CacheType>) {
-  i.reply({ content: 'used /ban flux', ephemeral: true })
-}
-
-export async function handleBanSchedule(i: CommandInteraction<CacheType>) {
-  i.reply({ content: 'used /ban schedule', ephemeral: true })
-}

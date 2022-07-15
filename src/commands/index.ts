@@ -1,6 +1,9 @@
-import { banCmd } from './ban'
-import { draftCmd } from './draft'
-import { preferencesCmd } from './preferences'
-import { rankCmd } from './rank'
+import { banCmd } from './bans/commands'
+import { configCmd } from './config/commands'
+import { draftCmd } from './draft/commands'
+import { preferencesCmd } from './preferences/commands'
+import { rankCmd } from './rank/commands'
 
-export const commands = [banCmd, draftCmd, preferencesCmd, rankCmd].map((cmd) => cmd.toJSON())
+export const commands = [banCmd, configCmd, draftCmd, preferencesCmd, rankCmd].map((cmd) =>
+  cmd.toJSON(),
+)

@@ -1,4 +1,6 @@
-export const FLUX = [
+export const defaultPlayerCount = 16
+
+export const allFlux = [
   {
     name: "Odran's Razor",
     description: 'PvP combat is unmodified.',

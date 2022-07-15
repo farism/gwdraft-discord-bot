@@ -3,11 +3,8 @@ import { Routes } from 'discord-api-types/v9'
 import { Client, Intents } from 'discord.js'
 import { commands } from './commands'
 
-export const CLIENT_ID = '989459684715008040'
+export const rest = new REST({ version: '9' })
 
-export const TOKEN = 'OTg5NDU5Njg0NzE1MDA4MDQw.G7SQa2.caRsGKb5Vpz4w_VH0_0bY4sCEPbzljd6rsBNj8'
-
-export const rest = new REST({ version: '9' }).setToken(TOKEN)
 export const client = new Client({
   intents: [
     Intents.FLAGS.GUILDS,
@@ -21,17 +18,28 @@ client.on('ready', () => {
   console.log(`Logged in as ${client.user?.tag}!`)
 })
 
-export async function updateCommands() {
-  console.log('Started refreshing application (/) commands.')
+// must load .env config before calling login
+export async function setupClient() {
+  if (!process.env.DISCORD_CLIENT_ID) {
+    throw new Error('Missing DISCORD_CLIENT_ID environment variable')
+  }
 
-  await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands })
+  if (!process.env.DISCORD_TOKEN) {
+    throw new Error('Missing DISCORD_TOKEN environment variable')
+  }
 
-  console.log('Successfully reloaded application (/) commands.')
-}
+  rest.setToken(process.env.DISCORD_TOKEN)
 
-export async function login() {
   try {
-    await client.login(TOKEN)
+    console.log('Updating application slash commands...')
+
+    await rest.put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID), { body: commands })
+
+    console.log('Successfully updated application slash commands')
+
+    console.log('Logging in...')
+
+    await client.login(process.env.DISCORD_TOKEN)
   } catch (error) {
     console.error(error)
   }

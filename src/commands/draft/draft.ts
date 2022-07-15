@@ -1,4 +1,3 @@
-import { SlashCommandBuilder } from '@discordjs/builders'
 import {
   addDays,
   differenceInMilliseconds,
@@ -6,13 +5,10 @@ import {
   formatDuration,
   intervalToDuration,
   isAfter,
-  isMatch,
-  parse,
   subHours,
 } from 'date-fns'
 import { zonedTimeToUtc } from 'date-fns-tz'
 import {
-  CacheType,
   CommandInteraction,
   Message,
   MessageActionRow,
@@ -20,9 +16,9 @@ import {
   MessageEmbed,
   User,
 } from 'discord.js'
-import { FLUX } from '../constants'
-import { GuildId, Profession, ProfessionEmojiIds } from '../types'
-import { getDraft, getUser } from './helpers'
+import { defaultPlayerCount, allFlux } from '../../helpers/constants'
+import { parseTime } from '../../helpers/time'
+import { GuildId } from '../../types'
 
 const draftIds: { [k: GuildId]: number } = {}
 
@@ -47,10 +43,12 @@ export class Draft {
   location: string
   message?: Message
   signupMessage?: Message
-  notifiedUsers: string[] = []
-  timerNotify: NodeJS.Timer
+  usersNotifiedOfCount: string[] = []
+  usersNotifiedOfReady: string[] = []
+  timer: NodeJS.Timer
   timerUpdate: NodeJS.Timer
   users: User[] = []
+  readyUsers: string[] = []
 
   constructor(interaction: CommandInteraction) {
     const time = interaction.options.getString('time')
@@ -71,7 +69,7 @@ export class Draft {
     this.description = description
     this.id = nextDraftId(interaction.guildId || '')
     this.host = interaction.user
-    this.timerNotify = setInterval(() => {
+    this.timer = setInterval(() => {
       this.notifySignup()
       this.notifyUsers()
     }, 1000)
@@ -85,6 +83,26 @@ export class Draft {
 
   get hasStarted() {
     return new Date() > this.date
+  }
+
+  get hasReachedCount() {
+    return this.usersInCount.length >= this.count
+  }
+
+  get allInCountReady() {
+    return this.usersInCount.filter((u) => this.readyUsers.includes(u.id)).length === this.count
+  }
+
+  get canIndicateReady() {
+    return this.hasStarted && this.hasReachedCount
+  }
+
+  get shouldCommence() {
+    return this.hasStarted && this.hasReachedCount && this.allInCountReady
+  }
+
+  get usersInCount() {
+    return this.users.slice(0, this.count)
   }
 
   get countdown() {
@@ -131,6 +149,10 @@ export class Draft {
           this.removeUser(i.user)
 
           i.reply({ content: 'You have left the draft', ephemeral: true })
+        } else if (i.customId === 'ready') {
+          this.setReady(i.user)
+
+          i.reply({ content: 'You have indicated you are ready to play', ephemeral: true })
         }
       })
 
@@ -152,7 +174,17 @@ export class Draft {
   }
 
   createComponents() {
-    return new MessageActionRow().addComponents(
+    const row = new MessageActionRow()
+
+    row.addComponents(
+      new MessageButton()
+        .setCustomId('ready')
+        .setLabel('Ready')
+        .setStyle('SUCCESS')
+        .setDisabled(!this.canIndicateReady),
+    )
+
+    row.addComponents(
       new MessageButton()
         .setCustomId('join')
         .setLabel('Join')
@@ -164,6 +196,8 @@ export class Draft {
         .setStyle('SECONDARY')
         .setDisabled(this.countdown > 0),
     )
+
+    return row
   }
 
   createEmbed() {
@@ -171,14 +205,16 @@ export class Draft {
 
     const month = format(new Date(), 'MMMM')
 
-    const flux = FLUX[this.date.getMonth()]
+    const flux = allFlux[this.date.getMonth()]
 
     const divider = (i: number) => (i === this.count ? '-----\n' : '')
 
     const signups =
       this.users.length === 0
         ? 'None'
-        : this.users.map((user, i) => `${divider(i)}${i + 1}. <@${user.id}>`).join('\n')
+        : this.users
+            .map((user, i) => `${divider(i)}${i + 1}. <@${user.id}> ${this.formatReady(user)}`)
+            .join('\n')
 
     const embed = new MessageEmbed()
 
@@ -196,11 +232,8 @@ export class Draft {
       embed.addField('Description', this.description)
     }
 
-    if (this.count !== defaultPlayerCount) {
-      embed.addField('Player Count', String(this.count))
-    }
-
     embed
+      .addField('Player Count', String(this.count))
       .addField(`${month} Flux - ${flux.name}`, `${flux.description} [wiki](${flux.link})`)
       .addField('Bans', `No bans`)
       .addField('Host', `<@${this.host.id}>`)
@@ -209,20 +242,20 @@ export class Draft {
     return embed
   }
 
+  formatReady(user: User) {
+    return this.readyUsers.find((id) => id === user.id) ? ' ✓' : ''
+  }
+
   canUserSignup(user: User) {
     return this.isUserTheHost(user) || new Date() > this.signupDate
   }
 
-  hasReachedCount() {
-    return this.usersInCount().length >= this.count
+  isUserNotifiedOfCount(user: User) {
+    return this.usersNotifiedOfCount.includes(user.id)
   }
 
-  usersInCount() {
-    return this.users.slice(0, this.count)
-  }
-
-  isUserNotified(user: User) {
-    return this.notifiedUsers.includes(user.id)
+  isUserNotifiedOReady(user: User) {
+    return this.usersNotifiedOfReady.includes(user.id)
   }
 
   isUserTheHost(user: User) {
@@ -244,7 +277,25 @@ export class Draft {
   async removeUser(user: User) {
     this.users = this.users.filter((u) => u.id !== user.id)
 
+    this.readyUsers = this.readyUsers.filter((id) => id != user.id)
+
     this.updateMessage()
+  }
+
+  async moveUser(user: User, position: number) {
+    this.users = this.users.filter((u) => u.id !== user.id)
+
+    this.users.splice(position, 0, user)
+
+    this.updateMessage()
+  }
+
+  async setReady(user: User) {
+    if (this.isUserInDraft(user)) {
+      this.readyUsers = [...this.readyUsers, user.id]
+
+      this.updateMessage()
+    }
   }
 
   async notifySignup() {
@@ -260,23 +311,33 @@ export class Draft {
   }
 
   async notifyUsers() {
-    if (!this.hasReachedCount() || new Date() < this.date) {
-      return
+    if (this.shouldCommence) {
+      this.usersInCount.forEach((u) => {
+        if (!this.isUserNotifiedOReady(u)) {
+          this.usersNotifiedOfReady.push(u.id)
+
+          u.send(
+            [`The players in the draft count are all ready, please meet in ${this.location}`].join(
+              '\n\n',
+            ),
+          ).then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
+        }
+      })
+    } else if (this.hasReachedCount) {
+      this.usersInCount.forEach((u) => {
+        if (!this.isUserNotifiedOfCount(u)) {
+          this.usersNotifiedOfCount.push(u.id)
+
+          u.send(
+            [`The draft has enough players, please indicate if you are ready to play`].join('\n\n'),
+          ).then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
+        }
+      })
     }
-
-    this.usersInCount().forEach((u) => {
-      if (!this.isUserNotified(u)) {
-        this.notifiedUsers.push(u.id)
-
-        u.send([`The draft has enough players, please meet in ${this.location}`].join('\n\n')).then(
-          (m) => setTimeout(() => m.delete(), 5 * 60 * 1000),
-        )
-      }
-    })
   }
 
   async cancel(canceler: User) {
-    clearInterval(this.timerNotify)
+    clearInterval(this.timer)
     clearInterval(this.timerUpdate)
 
     await this.interaction.editReply({
@@ -286,130 +347,5 @@ export class Draft {
     await this.signupMessage?.delete()
 
     await this.message?.delete()
-  }
-}
-
-const defaultPlayerCount = 16
-
-const drafts: { [k: GuildId]: Draft } = {}
-
-const allProfessions = Object.values(Profession)
-
-const professionEmojis: ProfessionEmojiIds = {
-  Assassin: '991859233593249833',
-  Dervish: '991801732864671754',
-  Elementalist: '991801734634684446',
-  Mesmer: '991801736329175151',
-  Monk: '991801737616834570',
-  Necromancer: '991801738896089098',
-  Paragon: '991801740108234792',
-  Ranger: '991801741601423562',
-  Ritualist: '991801742725488690',
-  Warrior: '991801744373854319',
-}
-
-export const draftCmd = new SlashCommandBuilder()
-  .setName('draft')
-  .setDescription(`Manage drafts`)
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName('start')
-      .setDescription('Start a draft now, or at the specified time')
-      .addStringOption((option) =>
-        // prettier-ignore
-        option
-          .setName('time')
-          .setDescription('Starts the draft at the specified time in HH:mm format GMT+2 (e.g. "20:00")'),
-      )
-      .addStringOption((option) =>
-        // prettier-ignore
-        option
-          .setName('location')
-          .setDescription('The location where players should players meet in game (default = GToB AE1)'),
-      )
-      .addIntegerOption((option) =>
-        // prettier-ignore
-        option
-          .setName('count')
-          .setDescription('How many players are required to join the draft before starting (default = 16)'),
-      )
-      .addStringOption((option) =>
-        // prettier-ignore
-        option
-          .setName('description')
-          .setDescription('Adds a description to the draft'),
-      ),
-  )
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName('removeplayer')
-      .setDescription('Manually remove a player from the draft')
-      .addUserOption((option) =>
-        // prettier-ignore
-        option
-          .setName('user')
-          .setDescription('The use to remove')
-          .setRequired(true),
-      ),
-  )
-  .addSubcommand((subcommand) =>
-    subcommand.setName('cancel').setDescription('Cancel the current draft'),
-  )
-
-function parseTime(s: string) {
-  if (isMatch(s, 'HH:mm')) {
-    return parse(s, 'HH:mm', new Date())
-  } else if (isMatch(s, 'HH:mm:ss')) {
-    return parse(s, 'HH:mm:ss', new Date())
-  }
-
-  return new Date()
-}
-
-export async function handleDraftStart(i: CommandInteraction<CacheType>) {
-  if (!i.guildId) {
-    i.reply({ content: 'Invalid guild id' })
-    return
-  }
-
-  if (drafts[i.guildId]) {
-    i.reply({ content: 'Active draft exists' })
-    return
-  }
-
-  await i.reply({ content: `<@${i.user.id}> has started a draft` })
-
-  drafts[i.guildId] = new Draft(i)
-}
-
-export async function handleDraftRemovePlayer(i: CommandInteraction<CacheType>) {
-  const user = getUser(i)
-
-  const draft = getDraft(i, drafts)
-
-  if (draft) {
-    draft.removeUser(user)
-  }
-
-  await i.reply({ content: `used /draft removeplayer` })
-}
-
-export async function handleDraftCancel(i: CommandInteraction<CacheType>) {
-  if (!i.guildId) {
-    return
-  }
-
-  const draft = drafts[i.guildId]
-
-  if (draft) {
-    try {
-      await draft.cancel(i.user)
-    } catch (e) {}
-
-    delete drafts[i.guildId]
-
-    await i.reply({ content: `Canceling draft`, ephemeral: true })
-  } else {
-    await i.reply({ content: `There is no active draft to cancel`, ephemeral: true })
   }
 }

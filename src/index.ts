@@ -1,19 +1,33 @@
-import { client, login, updateCommands } from './client'
-import { handleBanFlux, handleBanSchedule, handleBanSkill } from './commands/ban'
-import { handleDraftCancel, handleDraftRemovePlayer, handleDraftStart } from './commands/draft'
+import { CommandInteraction, Formatters } from 'discord.js'
+import dotenv from 'dotenv'
+import { client, setupClient } from './client'
+import { handleBanFlux, handleBanSchedule, handleBanSkill } from './commands/bans/handlers'
+import {
+  handleDraftAddPlayer,
+  handleDraftCancel,
+  handleDraftEdit,
+  handleDraftMovePlayer,
+  handleDraftRemovePlayer,
+  handleDraftStart,
+} from './commands/draft/handlers'
 import {
   handlePreferencesClear,
   handlePreferencesSet,
   handlePreferencesView,
-} from './commands/preferences'
+} from './commands/preferences/handlers'
 import {
   handleRankAll,
   handleRankProfession,
   handleRankReset,
   handleRankUtility,
   handleRankView,
-} from './commands/rank'
+} from './commands/rank/handlers'
 import './firebase'
+
+// load env variables
+dotenv.config()
+
+// handle commands
 ;(async () => {
   try {
     client.on('interactionCreate', async (i) => {
@@ -21,55 +35,66 @@ import './firebase'
         return
       }
 
-      const judgeRole = i.guild?.roles.cache.find((role) => role.name === 'draft-judge')
+      const subcommand = i.options.getSubcommand()
 
-      if (judgeRole) {
-        // const judges = members?.filter((member) => true)
-      }
-
-      const subcommandName = i.options.getSubcommand()
+      let handler: ((i: CommandInteraction) => Promise<void>) | null = null
 
       if (i.commandName === 'rank') {
-        if (subcommandName === 'profession') {
-          await handleRankProfession(i)
-        } else if (subcommandName === 'utility') {
-          await handleRankUtility(i)
-        } else if (subcommandName === 'all') {
-          await handleRankAll(i)
-        } else if (subcommandName === 'reset') {
-          await handleRankReset(i)
-        } else if (subcommandName === 'view') {
-          await handleRankView(i)
+        if (subcommand === 'profession') {
+          handler = handleRankProfession
+        } else if (subcommand === 'utility') {
+          handler = handleRankUtility
+        } else if (subcommand === 'all') {
+          handler = handleRankAll
+        } else if (subcommand === 'reset') {
+          handler = handleRankReset
+        } else if (subcommand === 'view') {
+          handler = handleRankView
         }
       } else if (i.commandName === 'draft') {
-        if (subcommandName === 'start') {
-          await handleDraftStart(i)
-        } else if (subcommandName === 'removeplayer') {
-          await handleDraftRemovePlayer(i)
-        } else if (subcommandName === 'cancel') {
-          await handleDraftCancel(i)
+        if (subcommand === 'start') {
+          handler = handleDraftStart
+        } else if (subcommand === 'addplayer') {
+          handler = handleDraftAddPlayer
+        } else if (subcommand === 'removeplayer') {
+          handler = handleDraftRemovePlayer
+        } else if (subcommand === 'moveplayer') {
+          handler = handleDraftMovePlayer
+        } else if (subcommand === 'edit') {
+          handler = handleDraftEdit
+        } else if (subcommand === 'cancel') {
+          handler = handleDraftCancel
         }
       } else if (i.commandName === 'ban') {
-        if (subcommandName === 'skill') {
-          await handleBanSkill(i)
-        } else if (subcommandName === 'flux') {
-          await handleBanFlux(i)
-        } else if (subcommandName === 'schedule') {
-          await handleBanSchedule(i)
+        if (subcommand === 'skill') {
+          handler = handleBanSkill
+        } else if (subcommand === 'flux') {
+          handler = handleBanFlux
+        } else if (subcommand === 'schedule') {
+          handler = handleBanSchedule
         }
       } else if (i.commandName === 'preferences') {
-        if (subcommandName === 'set') {
-          await handlePreferencesSet(i)
-        } else if (subcommandName === 'reset') {
-          await handlePreferencesClear(i)
-        } else if (subcommandName === 'view') {
-          await handlePreferencesView(i)
+        if (subcommand === 'set') {
+          handler = handlePreferencesSet
+        } else if (subcommand === 'reset') {
+          handler = handlePreferencesClear
+        } else if (subcommand === 'view') {
+          handler = handlePreferencesView
         }
+      }
+
+      i.options.data.forEach((opt) => {
+        opt.options?.forEach((opt) => {
+          console.log(opt.name, opt.value)
+        })
+      })
+
+      if (handler) {
+        await handler(i)
       }
     })
 
-    updateCommands()
-    login()
+    setupClient()
   } catch (error) {
     console.error(error)
   }

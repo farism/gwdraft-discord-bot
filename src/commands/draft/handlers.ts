@@ -1,7 +1,7 @@
-import { CommandInteraction, User } from 'discord.js'
+import { CommandInteraction } from 'discord.js'
 import { addLossToPlayer, addWinToPlayer, getGuildSettings } from '../../firebase'
 import { GuildId } from '../../types'
-import { interactionHasRole } from '../helpers'
+import { userHasRole } from '../helpers'
 import { Draft } from './draft'
 
 const drafts: { [k: GuildId]: Draft } = {}
@@ -25,15 +25,15 @@ export async function handleDraftCreate(i: CommandInteraction) {
 
   const guildSettings = await getGuildSettings(i)
 
-  const userHasRole = guildSettings?.draft_moderator_role
-    ? interactionHasRole(i, guildSettings?.draft_moderator_role || '')
+  const hasRole = guildSettings?.draft_moderator_role
+    ? userHasRole(i.guild, i.user, guildSettings?.draft_moderator_role || '')
     : true
 
   const isInDraftChannel = guildSettings?.draft_channel
     ? guildSettings.draft_channel === i.channel?.id
     : true
 
-  if (!userHasRole) {
+  if (!hasRole) {
     await i.reply({
       content: `You do not have the <@&${guildSettings?.draft_moderator_role}> role`,
       ephemeral: true,
@@ -134,18 +134,16 @@ export async function handleDraftEdit(i: CommandInteraction) {
 }
 
 export async function handleDraftCancel(i: CommandInteraction) {
-  if (!i.guildId) {
-    return
-  }
-
-  const draft = drafts[i.guildId]
+  const draft = getDraft(i)
 
   if (draft) {
     try {
       await draft.cancel(i.user)
     } catch (e) {}
 
-    delete drafts[i.guildId]
+    if (draft.interaction.guildId) {
+      delete drafts[draft.interaction.guildId]
+    }
 
     await i.reply({ content: `Draft canceled`, ephemeral: true })
   } else {

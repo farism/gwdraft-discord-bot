@@ -33,6 +33,13 @@ export const teamCmd = new SlashCommandBuilder()
           .setName('user')
           .setDescription('The player to pick')
           .setRequired(true),
+      )
+      .addIntegerOption((option) =>
+        // prettier-ignore
+        option
+          .setName('team')
+          .setDescription('The team to assign the player to (optional for captains)')
+          .setChoices({ name: '1', value: 1 }, { name: '2', value: 2 }),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -45,6 +52,13 @@ export const teamCmd = new SlashCommandBuilder()
           .setName('user')
           .setDescription('The player to kick')
           .setRequired(true),
+      )
+      .addIntegerOption((option) =>
+        // prettier-ignore
+        option
+          .setName('team')
+          .setDescription('The team to to remove the player from (optional for captains)')
+          .setChoices({ name: '1', value: 1 }, { name: '2', value: 2 }),
       ),
   )
   .addSubcommand((subcommand) =>

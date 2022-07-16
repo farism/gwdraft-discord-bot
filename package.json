@@ -26,8 +26,10 @@
     "firebase-admin": "11.0.0",
     "jest": "^28.1.2",
     "nanoid": "^4.0.0",
+    "p-limit": "^4.0.0",
     "ts-jest": "^28.0.5",
-    "uuid": "^8.3.2"
+    "uuid": "^8.3.2",
+    "wtf_wikipedia": "^10.0.1"
   },
   "devDependencies": {
     "@types/jest": "^28.1.3",

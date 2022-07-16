@@ -1,9 +1,11 @@
 import { decodeTemplate, skillbarToImage } from './skills'
 import fs from 'fs'
-import path from 'path'
+
+const skills = require('../assets/skills.json')
 
 describe('skills helpers', () => {
   describe('decode template', () => {
+    it('does stuff', async () => {})
     it('decodes a skill template', async () => {
       const skillbar = decodeTemplate('OgNToYm2wJX8LGrCRQSZlWgLA')
 

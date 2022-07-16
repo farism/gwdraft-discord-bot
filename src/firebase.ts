@@ -37,12 +37,11 @@ export function defaultRanks(rank: number = 0): Rankings {
   }
 }
 
-interface Settings {
-  draft_player_role?: string
+export interface Settings {
   draft_channel?: string
-  draft_moderator_role?: string
   draft_audit_log_channel?: string
-  ready_wait_time: string
+  draft_moderator_role?: string
+  draft_player_role?: string
 }
 
 export async function getGuildSettings(interaction: CommandInteraction): Promise<Settings | null> {

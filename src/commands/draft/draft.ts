@@ -16,10 +16,11 @@ import {
   MessageEmbed,
   User,
 } from 'discord.js'
-import { getGuildSettings, players } from '../../firebase'
+import { getGuildSettings, players, Settings } from '../../firebase'
 import { allFlux, defaultPlayerCount } from '../../helpers/constants'
 import { parseTime } from '../../helpers/time'
 import { GuildId } from '../../types'
+import { userHasRole } from '../helpers'
 
 const draftIds: { [k: GuildId]: number } = {}
 
@@ -43,20 +44,23 @@ export class Draft {
   interaction: CommandInteraction
   location: string
   message?: Message
+  readyUsers: string[] = []
+  readyWaitTime: number
+  settings: Settings | null = null
   signupMessage?: Message
-  usersNotifiedOfCount: string[] = []
-  usersNotifiedOfReady: string[] = []
+  teams: [User[], User[]] = [[], []]
   timer: NodeJS.Timer
   timerUpdate: NodeJS.Timer
   users: User[] = []
-  readyUsers: string[] = []
-  teams: [User[], User[]] = [[], []]
+  usersNotifiedOfCount: string[] = []
+  usersNotifiedOfReady: string[] = []
 
   constructor(i: CommandInteraction) {
     const time = i.options.getString('time')
     const location = i.options.getString('location') ?? 'Great Temple of Balthazar - AE1'
     const count = i.options.getInteger('count') ?? defaultPlayerCount
     const description = i.options.getString('description')
+    const readyWaitTime = i.options.getInteger('ready_wait_time') ?? 5
 
     const now = new Date()
     let date = time ? zonedTimeToUtc(parseTime(time), 'Europe/Paris') : now
@@ -64,13 +68,14 @@ export class Draft {
       date = addDays(date, 1)
     }
 
-    this.interaction = i
-    this.date = date
-    this.location = location
     this.count = count
+    this.date = date
     this.description = description
-    this.id = nextDraftId(i.guildId || '')
     this.host = i.user
+    this.id = nextDraftId(i.guildId || '')
+    this.interaction = i
+    this.location = location
+    this.readyWaitTime = readyWaitTime
     this.timer = setInterval(() => {
       this.notifySignup()
       this.notifyUsers()
@@ -158,8 +163,11 @@ export class Draft {
     return !!this.teams[team].find((u) => u.id === user.id)
   }
 
+  isUserModerator(user: User) {
+    return userHasRole(this.interaction.guild, user, this.settings?.draft_moderator_role || '')
+  }
+
   isUserCaptain(user: User) {
-    console.log(this.teams[0][0]?.id === user.id, this.teams[1][0]?.id === user.id)
     return this.teams[0][0]?.id === user.id || this.teams[1][0]?.id === user.id
   }
 
@@ -168,6 +176,8 @@ export class Draft {
   }
 
   async initialize() {
+    this.settings = await getGuildSettings(this.interaction)
+
     const embed = await this.createEmbed()
 
     const message = await this.interaction.channel?.send({
@@ -264,9 +274,9 @@ export class Draft {
     for (const [i, user] of this.users.entries()) {
       const doc = await (await players.doc(user.id).get()).data()
 
-      const ign = doc?.ign ?? ''
+      const ign = doc?.ign ? ` (${doc.ign})` : ''
 
-      signups.push(`${divider(i)}${i + 1}. <@${user.id}> ${this.formatReady(user)} (${ign})`)
+      signups.push(`${divider(i)}${i + 1}. <@${user.id}> ${this.formatReady(user)}${ign}`)
     }
 
     const embed = new MessageEmbed()
@@ -405,11 +415,9 @@ export class Draft {
       return
     }
 
-    const guildSettings = await getGuildSettings(this.interaction)
-
-    if (guildSettings?.draft_player_role) {
+    if (this.settings?.draft_player_role) {
       this.signupMessage = await this.message?.channel.send(
-        `Draft starting, sign up now! <@&${guildSettings.draft_player_role}>`,
+        `Draft starting, sign up now! <@&${this.settings.draft_player_role}>`,
       )
 
       this.hasSentSignupPing = true
@@ -417,8 +425,6 @@ export class Draft {
   }
 
   async notifyUsers() {
-    const guildSettings = await getGuildSettings(this.interaction)
-
     if (this.shouldStart) {
       this.usersInCount.forEach((u) => {
         if (!this.isUserNotifiedOReady(u)) {
@@ -441,10 +447,10 @@ export class Draft {
           ).then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
 
           setTimeout(() => {
-            if (!this.isUserReady(u)) {
+            if (!this.isUserReady(u) && this.usersInCount.length > this.count) {
               this.moveUserToBackOfQueue(u)
             }
-          }, parseInt(guildSettings?.ready_wait_time ?? '5', 10) * 60 * 1000)
+          }, this.readyWaitTime * 60 * 1000)
         }
       })
     }

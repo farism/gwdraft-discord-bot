@@ -8,11 +8,11 @@ import { teamCmd } from './team/commands'
 import { templatesCmd } from './template/commands'
 
 export const commands = [
-  banCmd,
+  // banCmd,
   draftCmd,
   playerCmd,
   preferencesCmd,
-  rankCmd,
+  // rankCmd,
   settingsCmd,
   teamCmd,
   templatesCmd,

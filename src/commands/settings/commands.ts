@@ -27,9 +27,3 @@ export const settingsCmd = new SlashCommandBuilder()
       .setName('draft_player_role')
       .setDescription('The role to ping when forming drafts'),
   )
-  .addIntegerOption((option) =>
-    // prettier-ignore
-    option
-      .setName('ready_wait_time')
-      .setDescription('How much time a player has to check ready before moving to end of queue, in minutes'),
-  )

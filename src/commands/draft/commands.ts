@@ -30,6 +30,12 @@ export const draftCmd = new SlashCommandBuilder()
         option
           .setName('description')
           .setDescription('Adds a description to the draft'),
+      )
+      .addIntegerOption((option) =>
+        // prettier-ignore
+        option
+          .setName('ready_wait_time')
+          .setDescription('How much time a player has to check ready before moving to end of queue, in minutes (default = 5)'),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -101,17 +107,18 @@ export const draftCmd = new SlashCommandBuilder()
           .setDescription('Adds a description to the draft'),
       ),
   )
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName('winner')
-      .setDescription('Record the winning team of the last game')
-      .addIntegerOption((option) =>
-        // prettier-ignore
-        option
-          .setName('team')
-          .setDescription('The winning team'),
-      ),
-  )
+  // .addSubcommand((subcommand) =>
+  //   subcommand
+  //     .setName('winner')
+  //     .setDescription('Record the winning team of the last game')
+  //     .addIntegerOption((option) =>
+  //       // prettier-ignore
+  //       option
+  //         .setName('team')
+  //         .setDescription('The winning team')
+  //         .setRequired(true),
+  //     ),
+  // )
   .addSubcommand((subcommand) =>
     subcommand.setName('cancel').setDescription('Cancel the current draft'),
   )

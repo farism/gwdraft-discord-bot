@@ -3,7 +3,7 @@ import { SlashCommandBuilder } from '@discordjs/builders'
 export const playerCmd = new SlashCommandBuilder()
   .setName('player')
   .setDescription(`Player management`)
-  .addSubcommand((subcommand) => subcommand.setName('stats').setDescription('View your stats'))
+  // .addSubcommand((subcommand) => subcommand.setName('stats').setDescription('View your stats'))
   .addSubcommand((subcommand) =>
     subcommand
       .setName('ign')

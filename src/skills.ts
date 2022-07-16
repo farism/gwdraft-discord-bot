@@ -1,5 +1,6 @@
-import { createCanvas, loadImage, Canvas } from 'canvas'
+import { createCanvas, loadImage, Canvas, Image } from 'canvas'
 import path from 'path'
+const skillsMapById = require('../assets/skillsMapById.json')
 
 interface SkillData {
   a: number
@@ -98,7 +99,7 @@ export interface Skillbar {
   template: string
 }
 
-const ProfessionAbbreviation: Record<Profession, string> = {
+export const ProfessionAbbreviation: Record<Profession, string> = {
   [Profession.None]: 'x',
   [Profession.Warrior]: 'W',
   [Profession.Ranger]: 'R',
@@ -112,7 +113,7 @@ const ProfessionAbbreviation: Record<Profession, string> = {
   [Profession.Dervish]: 'D',
 }
 
-const ProfessionNames: Record<Profession, string> = {
+export const ProfessionNames: Record<Profession, string> = {
   [Profession.None]: 'None',
   [Profession.Warrior]: 'Warrior',
   [Profession.Ranger]: 'Ranger',
@@ -126,7 +127,7 @@ const ProfessionNames: Record<Profession, string> = {
   [Profession.Dervish]: 'Dervish',
 }
 
-const AttributeNames: Record<Attribute, string> = {
+export const AttributeNames: Record<Attribute, string> = {
   [Attribute.FastCasting]: 'Fast Casting',
   [Attribute.IllusionMagic]: 'Illusion Magic',
   [Attribute.DominationMagic]: 'Domination Magic',
@@ -185,6 +186,18 @@ const TEMPLATE_TYPE = 14
 const VERSION = 0
 const BASE_64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
+export function getProfessionName<T extends keyof typeof ProfessionNames>(
+  profession: T,
+): typeof ProfessionNames[T] {
+  return ProfessionNames[profession]
+}
+
+export function getAttributeName<T extends keyof typeof AttributeNames>(
+  attribute: T,
+): typeof AttributeNames[T] {
+  return AttributeNames[attribute]
+}
+
 function binpadright(s: string, n: number) {
   return s.padEnd(n, '0')
 }
@@ -227,18 +240,6 @@ function bintocode(bin: string) {
   return c
 }
 
-export function getProfessionName(profession: Profession) {
-  return ProfessionNames[profession]
-}
-
-export function getProfessionAbbreviation(profession: Profession) {
-  return ProfessionAbbreviation[profession]
-}
-
-export function getAttributeName(attribute: Attribute) {
-  return AttributeNames[attribute]
-}
-
 export function decodeTemplate(template: string): Skillbar | null {
   const binary = codetobin(template)
   let offset = 0
@@ -267,7 +268,7 @@ export function decodeTemplate(template: string): Skillbar | null {
   const skills = new Array(8)
 
   for (let i = 0; i < 8; i++) {
-    skills[i] = read(skillBitLength)
+    skills[i] = skillsMapById[read(skillBitLength)]
   }
 
   return {
@@ -320,109 +321,43 @@ export function encodeSkillbar(skillbar: Exclude<Skillbar, 'template'>): string 
   return bintocode(template.join(''))
 }
 
-export function getSkillTypeName(skillData: SkillData) {
-  return skillData.e ? `Elite ${getTypeName()}` : getTypeName()
-
-  function getTypeName() {
-    switch (skillData.t) {
-      case 3:
-        return 'Stance'
-      case 4:
-        return 'Hex Spell'
-      case 5:
-        return 'Spell'
-      case 6:
-        if (skillData.z?.sp && skillData.z.sp & 0x800000) {
-          return 'Flash Enchantment Spell'
-        }
-        return 'Enchantment Spell'
-      case 7:
-        return 'Signet'
-      case 9:
-        return 'Well Spell'
-      case 10:
-        return 'Touch Skill'
-      case 11:
-        return 'Ward Spell'
-      case 12:
-        return 'Glyph'
-      case 14:
-        switch (skillData.z?.q) {
-          case 1:
-            return 'Axe Attack'
-          case 2:
-            return 'Bow Attack'
-          case 8:
-            switch (skillData.z?.co) {
-              case 1:
-                return 'Lead Attack'
-              case 2:
-                return 'Off-Hand Attack'
-              case 3:
-                return 'Dual Attack'
-              default:
-                return 'Dagger Attack'
-            }
-          case 16:
-            return 'Hammer Attack'
-          case 32:
-            return 'Scythe Attack'
-          case 64:
-            return 'Spear Attack'
-          case 70:
-            return 'Ranged Attack'
-          case 128:
-            return 'Sword Attack'
-        }
-        return 'Melee Attack'
-      case 15:
-        return 'Shout'
-      case 19:
-        return 'Preparation'
-      case 20:
-        return 'Pet Attack'
-      case 21:
-        return 'Trap'
-      case 22:
-        switch (skillData.p) {
-          case Profession.Ritualist:
-            return 'Binding Ritual'
-          case Profession.Ranger:
-            return 'Nature Ritual'
-          default:
-            return 'Ebon Vanguard Ritual'
-        }
-      case 24:
-        return 'Item Spell'
-      case 25:
-        return 'Weapon Spell'
-      case 26:
-        return 'Form'
-      case 27:
-        return 'Chant'
-      case 28:
-        return 'Echo'
-      default:
-        return 'Skill'
-    }
-  }
-}
-
-export function isEnchantment(skillData: SkillData) {
-  return skillData.t === 6
-}
-
 export async function skillbarToImage(skillbar: Skillbar): Promise<Canvas> {
   const canvas = createCanvas(8 * IMAGE_SIZE, IMAGE_SIZE)
   const ctx = canvas.getContext('2d')
-  const images = await Promise.all(
-    skillbar.skills.map((skillID) =>
-      loadImage(path.join(ASSETS_DIR, 'images', 'skills', `${skillID}.jpg`)),
-    ),
-  )
-  images.forEach((image, index) =>
-    ctx.drawImage(image, index * IMAGE_SIZE, 0, IMAGE_SIZE, IMAGE_SIZE),
-  )
+  const hex = await loadImage(path.join(ASSETS_DIR, 'images', 'skill-hex.png'))
+  const enchantment = await loadImage(path.join(ASSETS_DIR, 'images', 'skill-enchantment.png'))
+  const types: string[] = []
+  const promises: Promise<Image>[] = []
+
+  skillbar.skills.forEach((skill: any, i) => {
+    types.push(skill?.type)
+
+    promises.push(loadImage(path.join(ASSETS_DIR, 'images', 'skills', `${skill?.id || 0}.jpg`)))
+  })
+
+  try {
+    const images = await Promise.all(promises)
+
+    images.forEach((img, i) => {
+      ctx.drawImage(img, i * IMAGE_SIZE, 0, IMAGE_SIZE, IMAGE_SIZE)
+
+      if (types[i]?.includes('Hex')) {
+        ctx.drawImage(hex, i * IMAGE_SIZE + IMAGE_SIZE - 22, 2, 20, 19)
+      } else if (types[i]?.includes('Enchantment')) {
+        ctx.drawImage(enchantment, i * IMAGE_SIZE + IMAGE_SIZE - 22, 2, 20, 19)
+      }
+
+      ctx.fillStyle = 'rgba(50, 50, 50, 0.9)'
+      ctx.fillRect(i * IMAGE_SIZE + IMAGE_SIZE - 18, IMAGE_SIZE - 18, 18, 18)
+
+      ctx.font = '14px Arial'
+      ctx.fillStyle = 'white'
+      ctx.shadowColor
+      ctx.fillText(String(i + 1), i * IMAGE_SIZE + IMAGE_SIZE - 12, IMAGE_SIZE - 4)
+    })
+  } catch (e) {
+    console.error(e)
+  }
 
   return canvas
 }

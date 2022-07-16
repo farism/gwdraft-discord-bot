@@ -33,91 +33,59 @@ import {
   handleTeamReset,
   handleTeamSwap,
 } from './commands/team/handlers'
-import { handleSkillTemplate } from './commands/template/handlers'
+import { handleSkillTemplate, handleTeamTemplate } from './commands/template/handlers'
 import './firebase'
 import { getGuildSettings } from './firebase'
+import { checkDraftModerator } from './commands/helpers'
 
 // load env variables
 dotenv.config()
 
 function getHandler(i: CommandInteraction) {
-  let handler: ((i: CommandInteraction) => Promise<void>) | null = null
-
   const subcommand = i.options.getSubcommand(false)
 
-  if (i.commandName === 'rank') {
-    if (subcommand === 'profession') {
-      handler = handleRankProfession
-    } else if (subcommand === 'utility') {
-      handler = handleRankUtility
-    } else if (subcommand === 'all') {
-      handler = handleRankAll
-    } else if (subcommand === 'reset') {
-      handler = handleRankReset
-    } else if (subcommand === 'view') {
-      handler = handleRankView
-    }
-  } else if (i.commandName === 'draft') {
-    if (subcommand === 'create') {
-      handler = handleDraftCreate
-    } else if (subcommand === 'start') {
-      handler = handleDraftStart
-    } else if (subcommand === 'add_player') {
-      handler = handleDraftAddPlayer
-    } else if (subcommand === 'remove_player') {
-      handler = handleDraftRemovePlayer
-    } else if (subcommand === 'reorder_player') {
-      handler = handleDraftReorderPlayer
-    } else if (subcommand === 'winner') {
-      handler = handleDraftWinner
-    } else if (subcommand === 'edit') {
-      handler = handleDraftEdit
-    } else if (subcommand === 'cancel') {
-      handler = handleDraftCancel
-    }
-  } else if (i.commandName === 'team') {
-    if (subcommand === 'captain') {
-      handler = handleTeamCaptain
-    } else if (subcommand === 'pick') {
-      handler = handleTeamPick
-    } else if (subcommand === 'kick') {
-      handler = handleTeamKick
-    } else if (subcommand === 'swap') {
-      handler = handleTeamSwap
-    } else if (subcommand === 'reset') {
-      handler = handleTeamReset
-    }
-  } else if (i.commandName === 'bans') {
-    if (subcommand === 'skill') {
-      handler = handleBanSkill
-    } else if (subcommand === 'flux') {
-      handler = handleBanFlux
-    } else if (subcommand === 'schedule') {
-      handler = handleBanSchedule
-    }
-  } else if (i.commandName === 'preferences') {
-    if (subcommand === 'set') {
-      handler = handlePreferencesSet
-    } else if (subcommand === 'reset') {
-      handler = handlePreferencesClear
-    } else if (subcommand === 'view') {
-      handler = handlePreferencesView
-    }
-  } else if (i.commandName === 'player') {
-    if (subcommand === 'stats') {
-      handler = handlePlayerStats
-    } else if (subcommand === 'ign') {
-      handler = handlePlayerIgn
-    }
-  } else if (i.commandName === 'settings') {
-    handler = handleSettings
-  } else if (i.commandName === 'template') {
-    if (subcommand === 'skill') {
-      handler = handleSkillTemplate
-    }
+  const key = [i.commandName, subcommand].filter((c) => c).join('_')
+
+  const handlers = {
+    rank_profession: handleRankProfession,
+    rank_utility: handleRankUtility,
+    rank_all: handleRankAll,
+    rank_reset: handleRankReset,
+    rank_view: handleRankView,
+
+    draft_create: handleDraftCreate,
+    draft_start: handleDraftStart,
+    draft_add_player: handleDraftAddPlayer,
+    draft_remove_player: handleDraftRemovePlayer,
+    draft_reorder_player: handleDraftReorderPlayer,
+    draft_winner: handleDraftWinner,
+    draft_edit: handleDraftEdit,
+    draft_cancel: handleDraftCancel,
+
+    team_captain: handleTeamCaptain,
+    team_pick: handleTeamPick,
+    team_kick: handleTeamKick,
+    team_swap: handleTeamSwap,
+    team_reset: handleTeamReset,
+
+    bans_skill: handleBanSkill,
+    bans_flux: handleBanFlux,
+    bans_schedule: handleBanSchedule,
+
+    preferences_set: handlePreferencesSet,
+    preferences_reset: handlePreferencesClear,
+    preferences_view: handlePreferencesView,
+
+    player_stats: handlePlayerStats,
+    player_ign: handlePlayerIgn,
+
+    settings: handleSettings,
+
+    template_skill: handleSkillTemplate,
+    template_team: handleTeamTemplate,
   }
 
-  return handler
+  return handlers[key as keyof typeof handlers]
 }
 
 async function logDraftCommand(i: CommandInteraction) {
@@ -157,11 +125,11 @@ async function logDraftCommand(i: CommandInteraction) {
 
 // handle commands
 ;(async () => {
-  try {
-    setupClient()
+  setupClient()
 
-    client.on('interactionCreate', async (i) => {
-      if (!i.isCommand()) {
+  client.on('interactionCreate', async (i) => {
+    try {
+      if (!i.isCommand() || (i.commandName === 'draft' && !(await checkDraftModerator(i)))) {
         return
       }
 
@@ -174,8 +142,8 @@ async function logDraftCommand(i: CommandInteraction) {
       if (handler) {
         await handler(i)
       }
-    })
-  } catch (error) {
-    console.error(error)
-  }
+    } catch (e) {
+      console.error(e)
+    }
+  })
 })()

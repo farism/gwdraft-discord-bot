@@ -33,9 +33,11 @@ export async function setupClient() {
   try {
     console.log('Updating application slash commands...')
 
-    await rest.put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID), { body: commands })
-
-    console.log('Successfully updated application slash commands')
+    rest
+      .put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID), { body: commands })
+      .then(() => {
+        console.log('Successfully updated application slash commands')
+      })
 
     console.log('Logging in...')
 

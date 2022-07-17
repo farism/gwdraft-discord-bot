@@ -16,6 +16,7 @@ import {
   MessageEmbed,
   User,
 } from 'discord.js'
+import { client } from '../../client'
 import { getGuildSettings, players, Settings } from '../../firebase'
 import { allFlux, defaultPlayerCount } from '../../helpers/constants'
 import { parseTime } from '../../helpers/time'
@@ -44,6 +45,7 @@ export class Draft {
   interaction: CommandInteraction
   location: string
   message?: Message
+  messageId?: string
   readyUsers: string[] = []
   readyWaitTime: number
   settings: Settings | null = null
@@ -175,6 +177,16 @@ export class Draft {
     return this.readyUsers.includes(user.id)
   }
 
+  async getMessage() {
+    const guild = await client.guilds.fetch(this.interaction.guildId || '')
+
+    const channel = await guild.channels.fetch(this.interaction.channelId)
+
+    if (channel?.isText() && this.messageId) {
+      return await channel.messages.fetch(this.messageId)
+    }
+  }
+
   async initialize() {
     this.settings = await getGuildSettings(this.interaction)
 
@@ -186,6 +198,8 @@ export class Draft {
     })
 
     if (message) {
+      this.messageId = message.id
+
       const collector = message.createMessageComponentCollector({
         dispose: true,
         time: 24 * 60 * 60 * 1000,
@@ -210,8 +224,6 @@ export class Draft {
           i.reply({ content: 'You have changed your ready status', ephemeral: true })
         }
       })
-
-      this.message = message
     }
 
     this.updateMessage()
@@ -219,10 +231,12 @@ export class Draft {
 
   async updateMessage() {
     try {
-      if (this.message?.editable) {
+      const message = await this.getMessage()
+
+      if (message?.editable) {
         const embed = await this.createEmbed()
 
-        await this.message?.edit({
+        await message?.edit({
           embeds: [embed],
           components: [this.createComponents()],
         })
@@ -281,9 +295,7 @@ export class Draft {
 
     const embed = new MessageEmbed()
 
-    embed
-      .setTitle(`Draft #${this.id}`)
-      .addField('Start Time', this.isPastStartTime ? 'In Progress' : `<t:${time}>`)
+    embed.addField('Start Time', this.isPastStartTime ? 'In Progress' : `<t:${time}>`)
 
     if (this.countdown > 0) {
       embed.addField('Sign-ups Start In', this.countdownFormatted)
@@ -416,7 +428,9 @@ export class Draft {
     }
 
     if (this.settings?.draft_player_role) {
-      this.signupMessage = await this.message?.channel.send(
+      const message = await this.getMessage()
+
+      this.signupMessage = await message?.channel.send(
         `Draft starting, sign up now! <@&${this.settings.draft_player_role}>`,
       )
 
@@ -426,8 +440,9 @@ export class Draft {
 
   async notifyUsers() {
     if (this.shouldStart) {
-      this.usersInCount.forEach((u) => {
-        if (!this.isUserNotifiedOReady(u)) {
+      this.usersInCount
+        .filter((u) => !this.isUserNotifiedOReady(u))
+        .forEach((u) => {
           this.usersNotifiedOfReady.push(u.id)
 
           u.send(
@@ -435,11 +450,11 @@ export class Draft {
               '\n\n',
             ),
           ).then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
-        }
-      })
+        })
     } else if (this.isPastStartTime && this.hasAboveCount) {
-      this.usersInCount.forEach((u) => {
-        if (!this.isUserNotifiedOfCount(u)) {
+      this.usersInCount
+        .filter((u) => !this.isUserNotifiedOfCount(u))
+        .forEach((u) => {
           this.usersNotifiedOfCount.push(u.id)
 
           u.send(
@@ -451,8 +466,7 @@ export class Draft {
               this.moveUserToBackOfQueue(u)
             }
           }, this.readyWaitTime * 60 * 1000)
-        }
-      })
+        })
     }
   }
 
@@ -461,12 +475,12 @@ export class Draft {
     clearInterval(this.timerUpdate)
 
     await this.interaction.editReply({
-      content: `~~<@${this.interaction.user.id}> has started a draft~~\n\nDraft #${this.id} has been canceled by <@${canceler.id}>`,
+      content: `~~<@${this.interaction.user.id}> has started a draft~~\n\nDraft has been canceled by <@${canceler.id}>`,
     })
 
     await this.signupMessage?.delete()
 
-    await this.message?.delete()
+    await (await this.getMessage())?.delete()
   }
 
   async start() {

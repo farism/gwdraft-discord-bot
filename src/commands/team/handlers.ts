@@ -88,7 +88,10 @@ export async function handleTeamSwap(i: CommandInteraction) {
 
       await i.reply({ content: `Player swapped`, ephemeral: true })
     } else {
-      await i.reply({ content: `Only the host or captains can swap players`, ephemeral: true })
+      await i.reply({
+        content: `Only draft moderators or captains can swap players`,
+        ephemeral: true,
+      })
     }
   } else {
     await i.reply({ content: `There is no active draft`, ephemeral: true })

@@ -192,10 +192,16 @@ export class Draft {
 
     const embed = await this.createEmbed()
 
-    const message = await this.interaction.channel?.send({
-      embeds: [embed],
-      components: [this.createComponents()],
-    })
+    let message: Message<boolean> | undefined
+
+    try {
+      message = await this.interaction.channel?.send({
+        embeds: [embed],
+        components: [this.createComponents()],
+      })
+    } catch (e) {
+      console.error(e)
+    }
 
     if (message) {
       this.messageId = message.id
@@ -225,8 +231,6 @@ export class Draft {
         }
       })
     }
-
-    await this.updateMessage()
   }
 
   async updateMessage() {

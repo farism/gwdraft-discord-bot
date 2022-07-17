@@ -7,7 +7,7 @@ export async function handleSettings(i: CommandInteraction) {
     return
   }
 
-  if (userHasRole(i.guild, i.user, 'admin')) {
+  if (!userHasRole(i.guild, i.user, 'admin')) {
     return
   }
 

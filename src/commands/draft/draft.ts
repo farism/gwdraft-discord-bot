@@ -226,7 +226,7 @@ export class Draft {
       })
     }
 
-    this.updateMessage()
+    await this.updateMessage()
   }
 
   async updateMessage() {
@@ -326,7 +326,7 @@ export class Draft {
     if (!this.isUserInDraft(user)) {
       this.users = [...this.users, user]
 
-      this.updateMessage()
+      await this.updateMessage()
     }
   }
 
@@ -339,7 +339,7 @@ export class Draft {
 
     this.removeUserFromTeam(user, 1)
 
-    this.updateMessage()
+    await this.updateMessage()
   }
 
   async reorderUser(user: User, position: number) {
@@ -347,7 +347,7 @@ export class Draft {
 
     this.users.splice(position, 0, user)
 
-    this.updateMessage()
+    await this.updateMessage()
   }
 
   async setTeamCaptain(user: User, team: number) {
@@ -355,7 +355,7 @@ export class Draft {
       this.teams[team].unshift(user)
     }
 
-    this.updateMessage()
+    await this.updateMessage()
   }
 
   async addUserToTeam(user: User, team: number) {
@@ -363,13 +363,13 @@ export class Draft {
       this.teams[team].push(user)
     }
 
-    this.updateMessage()
+    await this.updateMessage()
   }
 
   async removeUserFromTeam(user: User, team: number) {
     this.teams[team] = this.teams[team].filter((u) => u.id !== user.id)
 
-    this.updateMessage()
+    await this.updateMessage()
   }
 
   async moveUserToBackOfQueue(user: User) {
@@ -377,7 +377,7 @@ export class Draft {
 
     this.users.push(user)
 
-    this.updateMessage()
+    await this.updateMessage()
   }
 
   async swapUserTeam(user: User) {
@@ -389,7 +389,7 @@ export class Draft {
       this.addUserToTeam(user, 0)
     }
 
-    this.updateMessage()
+    await this.updateMessage()
   }
 
   async addUserToCaptainsTeam(captain: User, user: User) {
@@ -399,7 +399,7 @@ export class Draft {
       this.addUserToTeam(user, 1)
     }
 
-    this.updateMessage()
+    await this.updateMessage()
   }
 
   async removeUserFromCaptainsTeam(captain: User, user: User) {
@@ -409,7 +409,7 @@ export class Draft {
       this.removeUserFromTeam(user, 1)
     }
 
-    this.updateMessage()
+    await this.updateMessage()
   }
 
   async toggleReady(user: User) {
@@ -419,7 +419,7 @@ export class Draft {
       this.readyUsers = [...this.readyUsers, user.id]
     }
 
-    this.updateMessage()
+    await this.updateMessage()
   }
 
   async notifySignup() {
@@ -486,6 +486,6 @@ export class Draft {
   async start() {
     this.readyUsers = []
 
-    this.updateMessage()
+    await this.updateMessage()
   }
 }

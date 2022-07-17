@@ -11,7 +11,7 @@ export const commands = [
   // banCmd,
   draftCmd,
   playerCmd,
-  preferencesCmd,
+  // preferencesCmd,
   // rankCmd,
   settingsCmd,
   teamCmd,

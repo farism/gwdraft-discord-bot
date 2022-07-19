@@ -531,7 +531,7 @@ export class Draft {
           )
           .then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
       } catch (e) {
-        console.log(`Failed to send signup DM to ${user.username}`)
+        console.log(`Failed to send all ready DM to ${user.username}`)
         console.log(e)
       }
     }
@@ -634,7 +634,12 @@ export class Draft {
       usersNotifiedOfReady: this.usersNotifiedOfReady,
     }
 
-    await drafts.doc(this.guildId).set(doc, { merge: true })
+    try {
+      await drafts.doc(this.guildId).set(doc, { merge: true })
+    } catch (e) {
+      console.log('Draft failed to save')
+      console.log(e)
+    }
   }
 
   async hydrateUsers(users: string[]) {

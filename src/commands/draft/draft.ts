@@ -638,7 +638,7 @@ export class Draft {
       usersNotifiedOfCount: this.usersNotifiedOfCount,
       usersNotifiedOfReady: this.usersNotifiedOfReady,
     }
-    q
+
     try {
       await drafts.doc(this.guildId).set(doc, { merge: true })
     } catch (e) {

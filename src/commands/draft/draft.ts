@@ -10,14 +10,15 @@ import {
 import { zonedTimeToUtc } from 'date-fns-tz'
 import {
   CommandInteraction,
-  Message,
+  Guild,
+  GuildBasedChannel,
   MessageActionRow,
   MessageButton,
   MessageEmbed,
   User,
 } from 'discord.js'
 import { client } from '../../client'
-import { getGuildSettings, players, Settings } from '../../firebase'
+import { drafts, getGuildSettings, players, Settings } from '../../firebase'
 import { allFlux, defaultPlayerCount } from '../../helpers/constants'
 import { parseTime } from '../../helpers/time'
 import { GuildId } from '../../types'
@@ -35,55 +36,102 @@ function nextDraftId(guildId: string) {
   return draftIds[guildId]
 }
 
-export class Draft {
-  count: number
-  date: Date
-  description: string | null
-  hasSentSignupPing: boolean = false
-  host: User
-  id: number
-  interaction: CommandInteraction
+interface DraftOptions {
+  hostId: string
+  guildId: string
+  channelId: string
+  time: string | null
   location: string
-  message?: Message
-  messageId?: string
-  readyUsers: string[] = []
+  count: number
+  description: string
   readyWaitTime: number
+  skipSignupPing: boolean
+  interaction?: CommandInteraction
+}
+
+export class Draft {
+  // options
+  channelId: string
+  count: number
+  description: string | null
+  guildId: string
+  hostId: string
+  id: number
+  location: string
+  readyWaitTime: number
+  skipSignupPing: boolean
+  time: string | null
+
+  // state
+  canceled: boolean = false
+  date: Date = new Date()
+  hasSentSignupPing: boolean = false
+  messageId: string | null = null
+  readyUsers: string[] = []
   settings: Settings | null = null
-  signupMessage?: Message
-  teams: [User[], User[]] = [[], []]
-  timer: NodeJS.Timer
+  signupMessageId: string | null = null
+  teams: { [k: number]: User[] } = {
+    1: [],
+    2: [],
+  }
+  timerNotify: NodeJS.Timer
   timerUpdate: NodeJS.Timer
   users: User[] = []
   usersNotifiedOfCount: string[] = []
   usersNotifiedOfReady: string[] = []
 
-  constructor(i: CommandInteraction) {
-    const time = i.options.getString('time')
-    const location = i.options.getString('location') ?? 'Great Temple of Balthazar - AE1'
-    const count = i.options.getInteger('count') ?? defaultPlayerCount
-    const description = i.options.getString('description')
-    const readyWaitTime = i.options.getInteger('ready_wait_time') ?? 5
+  interaction?: CommandInteraction
 
+  constructor({
+    hostId,
+    guildId,
+    channelId,
+    time,
+    location,
+    count = defaultPlayerCount,
+    description = '',
+    readyWaitTime = 5,
+    skipSignupPing = false,
+    interaction,
+  }: DraftOptions) {
     const now = new Date()
     let date = time ? zonedTimeToUtc(parseTime(time), 'Europe/Paris') : now
     if (date < now) {
       date = addDays(date, 1)
     }
 
+    this.interaction = interaction
+
+    this.channelId = channelId
     this.count = count
     this.date = date
     this.description = description
-    this.host = i.user
-    this.id = nextDraftId(i.guildId || '')
-    this.interaction = i
+    this.guildId = guildId
+    this.hostId = hostId
+    this.id = nextDraftId(guildId || '')
     this.location = location
     this.readyWaitTime = readyWaitTime
-    this.timer = setInterval(() => {
-      this.notifySignup()
-      this.notifyUsers()
+    this.skipSignupPing = skipSignupPing
+    this.time = time
+    this.timerNotify = setInterval(() => {
+      this.sendSignupPingToChannel()
+      this.dmUsers()
     }, 1000)
-    this.timerUpdate = setInterval(() => this.updateMessage(), 5000)
-    this.initialize()
+    this.timerUpdate = setInterval(() => {
+      // this.update()
+    }, 5000)
+  }
+
+  get guild(): Guild | undefined {
+    return client.guilds.cache.get(this.guildId)
+  }
+
+  get channel(): GuildBasedChannel | undefined {
+    const channel = this.guild?.channels.cache.get(this.channelId)
+
+    if (channel?.isText) {
+      return channel
+    }
   }
 
   get signupDate() {
@@ -98,16 +146,12 @@ export class Draft {
     return this.usersInCount.length >= this.count
   }
 
-  get allReady() {
-    return this.usersInCount.filter((u) => this.readyUsers.includes(u.id)).length === this.count
-  }
-
   get canIndicateReady() {
     return this.isPastStartTime && this.hasAboveCount
   }
 
-  get shouldStart() {
-    return this.isPastStartTime && this.hasAboveCount && this.allReady
+  get allUsersReadyInCount() {
+    return this.usersInCount.filter((u) => this.readyUsers.includes(u.id)).length === this.count
   }
 
   get usersInCount() {
@@ -134,7 +178,7 @@ export class Draft {
   }
 
   formatReady(user: User) {
-    return this.readyUsers.find((id) => id === user.id) ? ' ✓' : ''
+    return this.readyUsers.find((id) => id === user.id) ? '✓ ' : ''
   }
 
   canUserSignup(user: User) {
@@ -150,7 +194,7 @@ export class Draft {
   }
 
   isUserTheHost(user: User) {
-    return this.host.id === user.id
+    return this.hostId === user.id
   }
 
   isUserInDraft(user: User) {
@@ -162,56 +206,71 @@ export class Draft {
   }
 
   isUserOnTeam(user: User, team: number) {
-    return !!this.teams[team].find((u) => u.id === user.id)
+    return !!this.teams[team]?.find((u) => u.id === user.id)
   }
 
   isUserModerator(user: User) {
-    return userHasRole(this.interaction.guild, user, this.settings?.draft_moderator_role || '')
+    if (this.guild) {
+      return userHasRole(this.guild, user, this.settings?.draft_moderator_role || '')
+    }
+
+    return false
   }
 
   isUserCaptain(user: User) {
-    return this.teams[0][0]?.id === user.id || this.teams[1][0]?.id === user.id
+    return Object.values(this.teams).some((team) =>
+      team.some((u, i) => u.id === user.id && i === 0),
+    )
   }
 
   isUserReady(user: User) {
     return this.readyUsers.includes(user.id)
   }
 
-  async getMessage() {
-    const guild = await client.guilds.fetch(this.interaction.guildId || '')
+  async getMessage(id: string | null) {
+    const guild = await client.guilds.fetch(this.guildId)
 
-    const channel = await guild.channels.fetch(this.interaction.channelId)
+    const channel = await guild.channels.fetch(this.channelId)
 
-    if (channel?.isText() && this.messageId) {
-      return await channel.messages.fetch(this.messageId)
+    if (channel?.isText() && id) {
+      return await channel.messages.fetch(id, { force: true })
     }
   }
 
-  async initialize() {
-    this.settings = await getGuildSettings(this.interaction)
+  async sendInitialMessage() {
+    if (!this.channel?.isText()) {
+      throw new Error('Draft must be created in a text channel')
+    }
+
+    this.settings = await getGuildSettings(this.guildId)
 
     const embed = await this.createEmbed()
 
-    let message: Message<boolean> | undefined
-
-    try {
-      message = await this.interaction.channel?.send({
-        embeds: [embed],
-        components: [this.createComponents()],
-      })
-    } catch (e) {
-      console.error(e)
-    }
+    const message = await this.channel.send({
+      content: `A draft has been ${this.time ? 'scheduled' : 'created'}`,
+      embeds: [embed],
+      components: [this.createComponents()],
+    })
 
     if (message) {
       this.messageId = message.id
 
+      this.collectInteractions()
+    }
+  }
+
+  async collectInteractions() {
+    const message = await this.getMessage(this.messageId)
+
+    if (message) {
       const collector = message.createMessageComponentCollector({
         dispose: true,
-        time: 24 * 60 * 60 * 1000,
+        time: 7 * 24 * 60 * 60 * 1000,
       })
 
       collector.on('collect', async (i) => {
+        console.log('received interaction', i)
+
         if (i.customId === 'join') {
           if (this.isUserInDraft(i.user)) {
             i.reply({ content: 'You have already joined the draft', ephemeral: true })
@@ -230,12 +289,14 @@ export class Draft {
           i.reply({ content: 'You have changed your ready status', ephemeral: true })
         }
       })
+
+      await this.save()
     }
   }
 
-  async updateMessage() {
+  async update() {
     try {
-      const message = await this.getMessage()
+      const message = await this.getMessage(this.messageId)
 
       if (message?.editable) {
         const embed = await this.createEmbed()
@@ -244,8 +305,11 @@ export class Draft {
           embeds: [embed],
           components: [this.createComponents()],
         })
+
+        await this.save()
       }
     } catch (e) {
+      console.log('Failed to update message')
       console.log(e)
     }
   }
@@ -294,7 +358,7 @@ export class Draft {
 
       const ign = doc?.ign ? ` (${doc.ign})` : ''
 
-      signups.push(`${divider(i)}${i + 1}. <@${user.id}> ${this.formatReady(user)}${ign}`)
+      signups.push(`${divider(i)}${i + 1}. ${this.formatReady(user)}${user.username}${ign}`)
     }
 
     const embed = new MessageEmbed()
@@ -311,17 +375,17 @@ export class Draft {
       embed.addField('Description', this.description)
     }
 
-    const team1 = this.teams[0].map((u, i) => `${i + 1}. ${u.username}`).join('\n') || 'None'
-
-    const team2 = this.teams[1].map((u, i) => `${i + 1}. ${u.username}`).join('\n') || 'None'
-
     embed
       .addField('Player Count', String(this.count))
-      .addField(`${month} Flux - ${flux.name}`, `${flux.description} [wiki](${flux.link})`)
-      .addField('Host', `<@${this.host.id}>`)
+      // .addField(`${month} Flux - ${flux.name}`, `${flux.description} [wiki](${flux.link})`)
+      .addField('Host', `<@${this.hostId}>`)
+      .addField('\u200b', '-'.repeat(90))
       .addField('Signups', `${signups.length ? signups.join('\n') : 'None'}`)
-      .addField('Team 1', team1, true)
-      .addField('Team 2', team2, true)
+
+    Object.values(this.teams).forEach((team, i) => {
+      const t = team.map((u, i) => `${i + 1}. ${u.username}`).join('\n') || 'None'
+      embed.addField(`Team ${i + 1}`, t, true)
+    })
 
     return embed
   }
@@ -330,7 +394,7 @@ export class Draft {
     if (!this.isUserInDraft(user)) {
       this.users = [...this.users, user]
 
-      await this.updateMessage()
+      await this.update()
     }
   }
 
@@ -339,11 +403,9 @@ export class Draft {
 
     this.readyUsers = this.readyUsers.filter((id) => id != user.id)
 
-    this.removeUserFromTeam(user, 0)
+    Object.keys(this.teams).forEach((key) => this.removeUserFromTeam(user, parseInt(key, 10)))
 
-    this.removeUserFromTeam(user, 1)
-
-    await this.updateMessage()
+    await this.update()
   }
 
   async reorderUser(user: User, position: number) {
@@ -351,29 +413,29 @@ export class Draft {
 
     this.users.splice(position, 0, user)
 
-    await this.updateMessage()
+    await this.update()
   }
 
   async setTeamCaptain(user: User, team: number) {
     if (this.isUserInCount(user)) {
-      this.teams[team].unshift(user)
+      this.teams[team]?.unshift(user)
     }
 
-    await this.updateMessage()
+    await this.update()
   }
 
   async addUserToTeam(user: User, team: number) {
     if (this.isUserInCount(user) && !this.isUserOnTeam(user, team)) {
-      this.teams[team].push(user)
+      this.teams[team]?.push(user)
     }
 
-    await this.updateMessage()
+    await this.update()
   }
 
   async removeUserFromTeam(user: User, team: number) {
-    this.teams[team] = this.teams[team].filter((u) => u.id !== user.id)
+    this.teams[team] = this.teams[team]?.filter((u) => u.id !== user.id) ?? []
 
-    await this.updateMessage()
+    await this.update()
   }
 
   async moveUserToBackOfQueue(user: User) {
@@ -381,39 +443,39 @@ export class Draft {
 
     this.users.push(user)
 
-    await this.updateMessage()
+    await this.update()
   }
 
   async swapUserTeam(user: User) {
-    if (this.isUserOnTeam(user, 0)) {
-      this.removeUserFromTeam(user, 0)
-      this.addUserToTeam(user, 1)
-    } else if (this.isUserOnTeam(user, 1)) {
+    if (this.isUserOnTeam(user, 1)) {
       this.removeUserFromTeam(user, 1)
-      this.addUserToTeam(user, 0)
+      this.addUserToTeam(user, 2)
+    } else if (this.isUserOnTeam(user, 2)) {
+      this.removeUserFromTeam(user, 2)
+      this.addUserToTeam(user, 1)
     }
 
-    await this.updateMessage()
+    await this.update()
   }
 
   async addUserToCaptainsTeam(captain: User, user: User) {
-    if (this.isUserOnTeam(captain, 0)) {
-      this.addUserToTeam(user, 0)
-    } else if (this.isUserOnTeam(captain, 1)) {
+    if (this.isUserOnTeam(captain, 1)) {
       this.addUserToTeam(user, 1)
+    } else if (this.isUserOnTeam(captain, 2)) {
+      this.addUserToTeam(user, 2)
     }
 
-    await this.updateMessage()
+    await this.update()
   }
 
   async removeUserFromCaptainsTeam(captain: User, user: User) {
-    if (this.isUserOnTeam(captain, 0)) {
-      this.removeUserFromTeam(user, 0)
-    } else if (this.isUserOnTeam(captain, 1)) {
+    if (this.isUserOnTeam(captain, 1)) {
       this.removeUserFromTeam(user, 1)
+    } else if (this.isUserOnTeam(captain, 2)) {
+      this.removeUserFromTeam(user, 2)
     }
 
-    await this.updateMessage()
+    await this.update()
   }
 
   async toggleReady(user: User) {
@@ -423,73 +485,167 @@ export class Draft {
       this.readyUsers = [...this.readyUsers, user.id]
     }
 
-    await this.updateMessage()
+    await this.update()
   }
 
-  async notifySignup() {
-    if (this.countdown > 0 || this.hasSentSignupPing) {
+  async sendSignupPingToChannel() {
+    if (
+      this.skipSignupPing ||
+      !this.settings?.draft_player_role ||
+      this.countdown > 0 ||
+      this.hasSentSignupPing
+    ) {
       return
     }
 
-    if (this.settings?.draft_player_role) {
-      const message = await this.getMessage()
+    this.hasSentSignupPing = true
 
-      this.signupMessage = await message?.channel.send(
+    const message = await this.getMessage(this.messageId)
+
+    try {
+      const signupMsg = await message?.channel.send(
         `Draft starting, sign up now! <@&${this.settings.draft_player_role}>`,
       )
 
-      this.hasSentSignupPing = true
+      this.signupMessageId = signupMsg?.id || null
+
+      this.save()
+    } catch (e) {
+      console.log(`Failed to send signup notification message to channel ${message?.channel.id}`)
+      console.log(e)
     }
   }
 
-  async notifyUsers() {
-    if (this.shouldStart) {
-      this.usersInCount
-        .filter((u) => !this.isUserNotifiedOReady(u))
-        .forEach((u) => {
-          this.usersNotifiedOfReady.push(u.id)
+  async notifyCountHasFilled() {
+    this.usersInCount
+      .filter((u) => !this.isUserNotifiedOReady(u))
+      .forEach((u) => {
+        this.usersNotifiedOfReady.push(u.id)
 
+        try {
           u.send(
             [`The players in the draft count are all ready, please meet in ${this.location}`].join(
               '\n\n',
             ),
           ).then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
-        })
-    } else if (this.isPastStartTime && this.hasAboveCount) {
-      this.usersInCount
-        .filter((u) => !this.isUserNotifiedOfCount(u))
-        .forEach((u) => {
-          this.usersNotifiedOfCount.push(u.id)
+        } catch (e) {
+          console.log(`Failed to send signup DM to ${u.username}`)
+          console.log(e)
+        }
+      })
+  }
 
+  async notifyAllPlayersAreReady() {
+    this.usersInCount
+      .filter((u) => !this.isUserNotifiedOfCount(u))
+      .forEach((u) => {
+        this.usersNotifiedOfCount.push(u.id)
+
+        try {
           u.send(
             [`The draft has enough players, please indicate if you are ready to play`].join('\n\n'),
           ).then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
+        } catch (e) {
+          console.log(`Failed to send ready check DM to ${u.username}`)
+          console.log(e)
+        }
 
-          setTimeout(() => {
-            if (!this.isUserReady(u) && this.usersInCount.length > this.count) {
-              this.moveUserToBackOfQueue(u)
-            }
-          }, this.readyWaitTime * 60 * 1000)
-        })
+        setTimeout(() => {
+          if (!this.isUserReady(u) && this.usersInCount.length > this.count) {
+            this.moveUserToBackOfQueue(u)
+          }
+        }, this.readyWaitTime * 60 * 1000)
+      })
+  }
+
+  async dmUsers() {
+    if (this.hasAboveCount && this.allUsersReadyInCount) {
+      this.notifyAllPlayersAreReady()
+    } else if (this.isPastStartTime && this.hasAboveCount) {
+      this.notifyCountHasFilled()
     }
+
+    this.save()
   }
 
   async cancel(canceler: User) {
-    clearInterval(this.timer)
+    clearInterval(this.timerNotify)
     clearInterval(this.timerUpdate)
 
-    await this.interaction.editReply({
-      content: `~~<@${this.interaction.user.id}> has started a draft~~\n\nDraft has been canceled by <@${canceler.id}>`,
-    })
+    const message = await this.getMessage(this.messageId)
 
-    await this.signupMessage?.delete()
+    const signupMessage = await this.getMessage(this.signupMessageId)
 
-    await (await this.getMessage())?.delete()
+    if (message?.editable) {
+      message.edit({
+        content: `~~<@${this.hostId}> has started a draft~~\n\nDraft has been canceled by <@${canceler.id}>`,
+        embeds: [],
+        components: [],
+      })
+    }
+
+    if (signupMessage?.deletable) {
+      await signupMessage.delete()
+    }
+
+    this.canceled = true
+
+    this.save()
+  }
+
+  async save() {
+    const doc = {
+      channelId: this.channelId,
+      count: this.count,
+      description: this.description,
+      guildId: this.guildId,
+      hostId: this.hostId,
+      location: this.location,
+      readyWaitTime: this.readyWaitTime,
+      skipSignupPing: this.skipSignupPing,
+      time: this.time,
+
+      canceled: this.canceled,
+      date: this.date,
+      hasSentSignupPing: this.hasSentSignupPing,
+      messageId: this.messageId,
+      readyUsers: this.readyUsers,
+      signupMessageId: this.signupMessageId,
+      teams: Object.entries(this.teams).reduce(
+        (acc, [key, users]) => ({ ...acc, [key]: users.map((u) => u.id) }),
+        {} as { [k: string]: string[] },
+      ),
+      users: this.users.map((u) => u.id),
+      usersNotifiedOfCount: this.usersNotifiedOfCount,
+      usersNotifiedOfReady: this.usersNotifiedOfReady,
+    }
+
+    await drafts.doc(this.guildId).set(doc, { merge: true })
+  }
+
+  async hydrateUsers(users: string[]) {
+    const members = await this.guild?.members.fetch({ user: users })
+
+    members?.forEach((m) => this.users.push(m.user))
+  }
+
+  async hydrateTeams(teams: { [k: string]: string[] }) {
+    for (let [key, users] of Object.entries(teams)) {
+      const members = await this.guild?.members.fetch({ user: users })
+
+      members?.forEach((m) => {
+        const team = this.teams[parseInt(key, 10)]
+
+        if (team) {
+          team.push(m.user)
+        }
+      })
+    }
   }
 
   async start() {
     this.readyUsers = []
 
-    await this.updateMessage()
+    await this.update()
   }
 }

@@ -1,8 +1,9 @@
-import { CommandInteraction } from 'discord.js'
+import { CommandInteraction, DiscordAPIError } from 'discord.js'
 import dotenv from 'dotenv'
 import { client, setupClient } from './client'
 import { handleBanFlux, handleBanSchedule, handleBanSkill } from './commands/bans/handlers'
 import {
+  addDraft,
   handleDraftAddPlayer,
   handleDraftCancel,
   handleDraftCreate,
@@ -34,9 +35,9 @@ import {
   handleTeamSwap,
 } from './commands/team/handlers'
 import { handleSkillTemplate, handleTeamTemplate } from './commands/template/handlers'
-import './firebase'
-import { getGuildSettings } from './firebase'
+import { drafts, getGuildSettings } from './firebase'
 import { checkDraftModerator } from './commands/helpers'
+import { Draft } from './commands/draft/draft'
 
 // load env variables
 dotenv.config()
@@ -93,7 +94,7 @@ async function logDraftCommand(i: CommandInteraction) {
   const subcommand = i.options.getSubcommand()
   const options: string[] = []
   const user = i.user.username
-  const guildSettings = await getGuildSettings(i)
+  const guildSettings = await getGuildSettings(i.guildId)
 
   if (subcommand) {
     i.options.data.forEach((opt) => {
@@ -125,25 +126,75 @@ async function logDraftCommand(i: CommandInteraction) {
 
 // handle commands
 ;(async () => {
-  setupClient()
-
-  client.on('interactionCreate', async (i) => {
+  await setupClient(async () => {
     try {
-      if (!i.isCommand() || (i.commandName === 'draft' && !(await checkDraftModerator(i)))) {
-        return
-      }
+      for (let [key, guild] of client.guilds.cache) {
+        const doc = await drafts.doc(guild.id).get()
 
-      if (i.commandName === 'draft') {
-        logDraftCommand(i)
-      }
+        const data = doc.data()
 
-      const handler = getHandler(i)
+        if (data && !data.canceled) {
+          const draft = new Draft({
+            channelId: data.channelId,
+            count: data.count,
+            description: data.description,
+            guildId: data.guildId,
+            hostId: data.hostId,
+            location: data.location,
+            readyWaitTime: data.readyWaitTime,
+            skipSignupPing: data.skipSignupPing,
+            time: data.time,
+          })
 
-      if (handler) {
-        await handler(i)
+          addDraft(draft)
+
+          draft.date = data.date.toDate()
+          draft.hasSentSignupPing = data.hasSentSignupPing
+          draft.messageId = data.messageId
+          draft.readyUsers = data.readyUsers
+          draft.signupMessageId = data.signupMessageId
+          draft.usersNotifiedOfCount = data.usersNotifiedOfCount
+          draft.usersNotifiedOfReady = data.usersNotifiedOfReady
+
+          await draft.hydrateUsers(data.users)
+          await draft.hydrateTeams(data.teams)
+          await draft.collectInteractions()
+        }
       }
     } catch (e) {
+      console.log('Failed to hydrate existing draft')
       console.error(e)
+    }
+  })
+
+  client.on('interactionCreate', async (i) => {
+    if (i.isCommand()) {
+      try {
+        if (i.commandName === 'draft' && !(await checkDraftModerator(i))) {
+          return
+        }
+
+        if (i.commandName === 'draft') {
+          logDraftCommand(i)
+        }
+
+        const handler = getHandler(i)
+
+        if (handler) {
+          await handler(i)
+        }
+      } catch (e) {
+        if (i.guild && i.channelId) {
+          console.log('Error occured')
+          console.log('Guild:      ', i.guild?.name)
+          console.log('Channel:    ', i.guild?.channels.cache.get(i.channelId)?.name)
+          console.log('Command:    ', i.commandName)
+          console.log('Subcommand: ', i.options.getSubcommand())
+          console.log('User: ', i.user.username)
+        }
+
+        console.error(e)
+      }
     }
   })
 })()

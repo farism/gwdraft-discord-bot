@@ -10,7 +10,7 @@ export function userHasRole(guild: Guild | null, user: User, roleIdOrName: strin
 }
 
 export async function checkDraftModerator(i: CommandInteraction) {
-  const guildSettings = await getGuildSettings(i)
+  const guildSettings = await getGuildSettings(i.guildId)
 
   if (guildSettings?.draft_moderator_role) {
     if (!userHasRole(i.guild, i.user, guildSettings.draft_moderator_role)) {

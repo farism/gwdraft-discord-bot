@@ -6,24 +6,35 @@ import { Draft } from './draft'
 
 const drafts: { [k: GuildId]: Draft } = {}
 
+export function addDraft(draft: Draft) {
+  drafts[draft.guildId] = draft
+}
+
 export function getDraft(i: CommandInteraction) {
   if (i.guildId) {
     return drafts[i.guildId]
   }
 }
 
+export function removeDraft(draft: Draft) {
+  delete drafts[draft.guildId]
+}
+
 export async function handleDraftCreate(i: CommandInteraction) {
   if (!i.guildId) {
-    i.reply({ content: 'Invalid guild id' })
+    i.reply({ content: 'Invalid guild id', ephemeral: true })
     return
   }
 
-  // if (drafts[i.guildId]) {
-  //   i.reply({ content: 'Active already draft exists. You may need to cancel it first.' })
-  //   return
-  // }
+  if (drafts[i.guildId]) {
+    i.reply({
+      content: 'Active draft already exists. You need to cancel it first.',
+      ephemeral: true,
+    })
+    return
+  }
 
-  const guildSettings = await getGuildSettings(i)
+  const guildSettings = await getGuildSettings(i.guildId)
 
   const hasRole = guildSettings?.draft_moderator_role
     ? userHasRole(i.guild, i.user, guildSettings?.draft_moderator_role || '')
@@ -44,9 +55,39 @@ export async function handleDraftCreate(i: CommandInteraction) {
       ephemeral: true,
     })
   } else {
-    await i.reply({ content: `A draft has been scheduled` })
+    const time = i.options.getString('time')
+    const location = i.options.getString('location') || 'Great Temple of Balthazar - AE1'
+    const count = i.options.getInteger('count') || 16
+    const description = i.options.getString('description') || ''
+    const readyWaitTime = i.options.getInteger('ready_wait_time') || 5
+    const skipSignupPing = i.options.getBoolean('skip_signup_ping') || false
 
-    drafts[i.guildId] = new Draft(i)
+    if (i.guildId) {
+      try {
+        i.deferReply({ ephemeral: true })
+
+        const draft = new Draft({
+          channelId: i.channelId,
+          count,
+          description,
+          guildId: i.guildId,
+          hostId: i.user.id,
+          location,
+          readyWaitTime,
+          skipSignupPing,
+          time,
+          interaction: i, // TODO can we remove this ref?
+        })
+
+        await draft.sendInitialMessage()
+
+        drafts[i.guildId] = draft
+
+        await i.editReply({ content: 'Draft created' })
+      } catch (e) {
+        console.log(e)
+      }
+    }
   }
 }
 
@@ -114,7 +155,7 @@ export async function handleDraftEdit(i: CommandInteraction) {
     const host = i.options.getUser('host')
 
     if (host) {
-      draft.host = host
+      draft.hostId = host.id
     }
 
     const location = i.options.getString('location')
@@ -139,10 +180,12 @@ export async function handleDraftCancel(i: CommandInteraction) {
   if (draft) {
     try {
       await draft.cancel(i.user)
-    } catch (e) {}
+    } catch (e) {
+      console.log(e)
+    }
 
-    if (draft.interaction.guildId) {
-      delete drafts[draft.interaction.guildId]
+    if (draft.guildId) {
+      delete drafts[draft.guildId]
     }
 
     await i.reply({ content: `Draft canceled`, ephemeral: true })

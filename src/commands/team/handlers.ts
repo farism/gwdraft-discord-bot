@@ -14,12 +14,14 @@ export async function handleTeamCaptain(i: CommandInteraction) {
 
     const team = i.options.getInteger('team', true)
 
-    if (draft.isUserInCount(user) && !draft.isUserCaptain(user)) {
-      draft.setTeamCaptain(user, team - 1)
+    if (!draft.isUserInCount(user)) {
+      await i.reply({ content: `This player is not in the count`, ephemeral: true })
+    } else if (draft.isUserCaptain(user)) {
+      await i.reply({ content: `This player is already a captain`, ephemeral: true })
+    } else {
+      draft.setTeamCaptain(user, team)
 
       await i.reply({ content: `You have assigned a team captain`, ephemeral: true })
-    } else {
-      await i.reply({ content: `This player is not in the count`, ephemeral: true })
     }
   } else {
     await i.reply({ content: `There is no active draft`, ephemeral: true })
@@ -41,7 +43,7 @@ export async function handleTeamPick(i: CommandInteraction) {
 
       await i.reply({ content: `Player picked`, ephemeral: true })
     } else if (draft.isUserModerator(user)) {
-      draft.addUserToTeam(user, (i.options.getInteger('team') ?? 1) - 1)
+      draft.addUserToTeam(user, i.options.getInteger('team') || 1)
 
       await i.reply({ content: `Player assigned to team`, ephemeral: true })
     } else {
@@ -66,7 +68,7 @@ export async function handleTeamKick(i: CommandInteraction) {
 
       await i.reply({ content: `Player kicked`, ephemeral: true })
     } else if (draft.isUserModerator(i.user)) {
-      draft.addUserToTeam(user, (i.options.getInteger('team') ?? 1) - 1)
+      draft.addUserToTeam(user, i.options.getInteger('team') ?? 1)
 
       await i.reply({ content: `Player assigned to team`, ephemeral: true })
     } else {
@@ -108,7 +110,7 @@ export async function handleTeamReset(i: CommandInteraction) {
   if (draft) {
     draft.teams = [[], []]
 
-    draft.updateMessage()
+    draft.update()
 
     await i.reply({ content: `The teams have been reset` })
   } else {

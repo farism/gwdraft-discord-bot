@@ -9,6 +9,8 @@ initializeApp({
 
 const db = getFirestore()
 
+export const drafts = db.collection('drafts')
+
 export const settings = db.collection('settings')
 
 export const players = db.collection('players')
@@ -44,10 +46,14 @@ export interface Settings {
   draft_player_role?: string
 }
 
-export async function getGuildSettings(interaction: CommandInteraction): Promise<Settings | null> {
-  const doc = await settings.doc(interaction.guildId || '').get()
+export async function getGuildSettings(guildId: string | null): Promise<Settings | null> {
+  if (guildId) {
+    const doc = await settings.doc(guildId).get()
 
-  return doc.data() as Settings | null
+    return doc.data() as Settings | null
+  }
+
+  return null
 }
 
 export async function addWinToPlayer(id: string) {

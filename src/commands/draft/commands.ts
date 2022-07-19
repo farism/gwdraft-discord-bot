@@ -36,6 +36,12 @@ export const draftCmd = new SlashCommandBuilder()
         option
           .setName('ready_wait_time')
           .setDescription('How much time a player has to check ready before moving to end of queue, in minutes (default = 5)'),
+      )
+      .addBooleanOption((option) =>
+        // prettier-ignore
+        option
+          .setName('skip_signup_ping')
+          .setDescription('This should be true if you want to skip the signup role ping (default = false)'),
       ),
   )
   .addSubcommand((subcommand) =>

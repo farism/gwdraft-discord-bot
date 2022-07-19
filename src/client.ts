@@ -14,12 +14,8 @@ export const client = new Client({
   partials: ['MESSAGE', 'CHANNEL', 'REACTION'],
 })
 
-client.on('ready', () => {
-  console.log(`Logged in as ${client.user?.tag}!`)
-})
-
 // must load .env config before calling login
-export async function setupClient() {
+export async function setupClient(onReady: () => void) {
   if (!process.env.DISCORD_CLIENT_ID) {
     throw new Error('Missing DISCORD_CLIENT_ID environment variable')
   }
@@ -40,6 +36,13 @@ export async function setupClient() {
       })
 
     console.log('Logging in...')
+
+    // client.on('debug', console.log)
+
+    client.on('ready', () => {
+      console.log('Logged in')
+      onReady()
+    })
 
     await client.login(process.env.DISCORD_TOKEN)
   } catch (error) {

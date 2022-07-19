@@ -24,7 +24,14 @@ export async function handlePlayerStats(i: CommandInteraction) {
 export async function handlePlayerIgn(i: CommandInteraction) {
   const doc = await players.doc(i.user.id)
 
-  await doc.set({ ign: i.options.getString('name') }, { merge: true })
+  const ign = i.options.getString('name')
+
+  try {
+    await doc.set({ ign }, { merge: true })
+  } catch (e) {
+    console.log('Failed to write ign', i.user.username, ign)
+    console.log(e)
+  }
 
   i.reply({ content: `You have set your in-game name`, ephemeral: true })
 }

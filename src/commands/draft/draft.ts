@@ -305,11 +305,16 @@ export class Draft {
           embeds: [embed],
           components: [this.createComponents()],
         })
-
-        await this.save()
       }
     } catch (e) {
       console.log('Failed to update message')
+      console.log(e)
+    }
+
+    try {
+      await this.save()
+    } catch (e) {
+      console.log('Save after update failed')
       console.log(e)
     }
   }
@@ -633,7 +638,7 @@ export class Draft {
       usersNotifiedOfCount: this.usersNotifiedOfCount,
       usersNotifiedOfReady: this.usersNotifiedOfReady,
     }
-
+    q
     try {
       await drafts.doc(this.guildId).set(doc, { merge: true })
     } catch (e) {
@@ -645,7 +650,12 @@ export class Draft {
   async hydrateUsers(users: string[]) {
     const members = await this.guild?.members.fetch({ user: users })
 
-    members?.forEach((m) => this.users.push(m.user))
+    users.forEach((id) => {
+      const member = members?.find((u) => u.id === id)
+      if (member) {
+        this.users.push(member.user)
+      }
+    })
   }
 
   async hydrateTeams(teams: { [k: string]: string[] }) {

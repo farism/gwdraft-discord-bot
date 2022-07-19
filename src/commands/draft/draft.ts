@@ -269,7 +269,7 @@ export class Draft {
       })
 
       collector.on('collect', async (i) => {
-        console.log('received interaction', i)
+        console.log('Received interaction', i.user.username, i.customId)
 
         if (i.customId === 'join') {
           if (this.isUserInDraft(i.user)) {
@@ -559,13 +559,23 @@ export class Draft {
   }
 
   async dmUsers() {
-    if (this.hasAboveCount && this.allUsersReadyInCount) {
-      this.notifyAllPlayersAreReady()
-    } else if (this.isPastStartTime && this.hasAboveCount) {
-      this.notifyCountHasFilled()
-    }
+    const prevUsersNotifiedOfCount = this.usersNotifiedOfCount.length
+    const prevUsersNotifiedOfReady = this.usersNotifiedOfReady.length
 
-    this.save()
+    try {
+      if (this.hasAboveCount && this.allUsersReadyInCount) {
+        await this.notifyAllPlayersAreReady()
+      } else if (this.isPastStartTime && this.hasAboveCount) {
+        await this.notifyCountHasFilled()
+      }
+    } catch (e) {}
+
+    if (
+      prevUsersNotifiedOfCount !== this.usersNotifiedOfCount.length ||
+      prevUsersNotifiedOfReady !== this.usersNotifiedOfReady.length
+    ) {
+      this.save()
+    }
   }
 
   async cancel(canceler: User) {

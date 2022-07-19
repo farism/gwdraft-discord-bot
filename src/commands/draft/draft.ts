@@ -517,45 +517,49 @@ export class Draft {
   }
 
   async notifyCountHasFilled() {
-    this.usersInCount
-      .filter((u) => !this.isUserNotifiedOReady(u))
-      .forEach((u) => {
-        this.usersNotifiedOfReady.push(u.id)
+    const users = this.usersInCount.filter((u) => !this.isUserNotifiedOReady(u))
 
-        try {
-          u.send(
+    users.forEach((u) => this.usersNotifiedOfReady.push(u.id))
+
+    for (let user of users) {
+      try {
+        await user
+          .send(
             [`The players in the draft count are all ready, please meet in ${this.location}`].join(
               '\n\n',
             ),
-          ).then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
-        } catch (e) {
-          console.log(`Failed to send signup DM to ${u.username}`)
-          console.log(e)
-        }
-      })
+          )
+          .then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
+      } catch (e) {
+        console.log(`Failed to send signup DM to ${user.username}`)
+        console.log(e)
+      }
+    }
   }
 
   async notifyAllPlayersAreReady() {
-    this.usersInCount
-      .filter((u) => !this.isUserNotifiedOfCount(u))
-      .forEach((u) => {
-        this.usersNotifiedOfCount.push(u.id)
+    const users = this.usersInCount.filter((u) => !this.isUserNotifiedOfCount(u))
 
-        try {
-          u.send(
+    users.forEach((u) => this.usersNotifiedOfCount.push(u.id))
+
+    for (let user of users) {
+      try {
+        await user
+          .send(
             [`The draft has enough players, please indicate if you are ready to play`].join('\n\n'),
-          ).then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
-        } catch (e) {
-          console.log(`Failed to send ready check DM to ${u.username}`)
-          console.log(e)
-        }
+          )
+          .then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
+      } catch (e) {
+        console.log(`Failed to send ready check DM to ${user.username}`)
+        console.log(e)
+      }
 
-        setTimeout(() => {
-          if (!this.isUserReady(u) && this.usersInCount.length > this.count) {
-            this.moveUserToBackOfQueue(u)
-          }
-        }, this.readyWaitTime * 60 * 1000)
-      })
+      setTimeout(() => {
+        if (!this.isUserReady(user) && this.usersInCount.length > this.count) {
+          this.moveUserToBackOfQueue(user)
+        }
+      }, this.readyWaitTime * 60 * 1000)
+    }
   }
 
   async dmUsers() {

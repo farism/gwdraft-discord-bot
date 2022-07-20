@@ -15,7 +15,7 @@ export const client = new Client({
 })
 
 // must load .env config before calling login
-export async function setupClient(onReady: () => void) {
+export async function setupClient(onReady: (client: Client) => void) {
   if (!process.env.DISCORD_CLIENT_ID) {
     throw new Error('Missing DISCORD_CLIENT_ID environment variable')
   }
@@ -41,7 +41,8 @@ export async function setupClient(onReady: () => void) {
 
     client.on('ready', () => {
       console.log('Logged in')
-      onReady()
+
+      onReady(client)
     })
 
     await client.login(process.env.DISCORD_TOKEN)

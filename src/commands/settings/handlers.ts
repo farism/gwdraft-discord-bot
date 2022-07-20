@@ -1,6 +1,6 @@
 import { CommandInteraction } from 'discord.js'
 import { settings } from '../../firebase'
-import { userHasRole } from '../helpers'
+import { userHasRole } from '../permissions'
 
 export async function handleSettings(i: CommandInteraction) {
   if (!i.guildId) {

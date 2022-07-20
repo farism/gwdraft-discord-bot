@@ -1,36 +1,16 @@
 import { CommandInteraction } from 'discord.js'
 import { addLossToPlayer, addWinToPlayer, getGuildSettings } from '../../firebase'
-import { GuildId } from '../../types'
-import { userHasRole } from '../helpers'
+import { userHasRole } from '../permissions'
 import { Draft } from './draft'
-
-const drafts: { [k: GuildId]: Draft } = {}
-
-export function addDraft(draft: Draft) {
-  drafts[draft.guildId] = draft
-}
-
-export function getDraft(i: CommandInteraction) {
-  if (i.guildId) {
-    return drafts[i.guildId]
-  }
-}
-
-export function removeDraft(draft: Draft) {
-  delete drafts[draft.guildId]
-}
+import { addDraft, getDraft, removeDraft } from './registry'
 
 export async function handleDraftCreate(i: CommandInteraction) {
-  if (!i.guildId) {
-    i.reply({ content: 'Invalid guild id', ephemeral: true })
-    return
-  }
-
-  if (drafts[i.guildId]) {
+  if (getDraft(i)) {
     i.reply({
       content: 'Active draft already exists. You need to cancel it first.',
       ephemeral: true,
     })
+
     return
   }
 
@@ -79,9 +59,13 @@ export async function handleDraftCreate(i: CommandInteraction) {
           interaction: i, // TODO can we remove this ref?
         })
 
-        await draft.sendInitialMessage()
+        addDraft(draft)
 
-        drafts[i.guildId] = draft
+        await draft.loadSettings()
+
+        await draft.sendEmbedMessage()
+
+        await draft.save()
 
         await i.editReply({ content: 'Draft created' })
       } catch (e) {
@@ -92,7 +76,7 @@ export async function handleDraftCreate(i: CommandInteraction) {
 }
 
 export async function handleDraftStart(i: CommandInteraction) {
-  if (!drafts[i.guildId || 0]) {
+  if (!getDraft(i)) {
     i.reply({ content: 'There is no active draft', ephemeral: true })
     return
   }
@@ -123,7 +107,7 @@ export async function handleDraftReorderPlayer(i: CommandInteraction) {
 
   const position = i.options.getInteger('position', true)
 
-  getDraft(i)?.reorderUser(user, position)
+  getDraft(i)?.reorderUser(user, position + 1)
 
   await i.reply({ content: `Player moved`, ephemeral: true })
 }
@@ -169,6 +153,8 @@ export async function handleDraftEdit(i: CommandInteraction) {
     if (description) {
       draft.description = description
     }
+
+    draft.updateEmbedMessage()
   }
 
   await i.reply({ content: `Draft edited`, ephemeral: true })
@@ -184,9 +170,7 @@ export async function handleDraftCancel(i: CommandInteraction) {
       console.log(e)
     }
 
-    if (draft.guildId) {
-      delete drafts[draft.guildId]
-    }
+    await removeDraft(draft)
 
     await i.reply({ content: `Draft canceled`, ephemeral: true })
   } else {

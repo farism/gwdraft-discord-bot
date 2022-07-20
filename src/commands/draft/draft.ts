@@ -1,6 +1,10 @@
 import {
   addDays,
+  addMilliseconds,
+  addMinutes,
   differenceInMilliseconds,
+  differenceInMinutes,
+  differenceInSeconds,
   formatDuration,
   intervalToDuration,
   subHours,
@@ -214,10 +218,6 @@ export class Draft {
     return subHours(this.date, 1)
   }
 
-  private get signupDateDiff() {
-    return
-  }
-
   private get isPastSignupTime() {
     return new Date() > this.signupDate
   }
@@ -251,13 +251,13 @@ export class Draft {
   }
 
   private get countdownFormatted() {
-    const start = differenceInMilliseconds(new Date(), this.signupDate)
+    const diff = differenceInMilliseconds(new Date(), this.signupDate)
 
-    if (start > 0) {
+    if (diff > 0) {
       return ''
     }
 
-    const duration = intervalToDuration({ start, end: 0 })
+    const duration = intervalToDuration({ start: diff, end: 0 })
 
     const format = duration.hours || duration.minutes ? ['hours', 'minutes'] : ['seconds']
 
@@ -388,8 +388,6 @@ export class Draft {
     this.users = this.users.filter((u) => u.id !== user.id)
 
     this.users.push(user)
-
-    await this.updateEmbedMessage()
   }
 
   private async toggleReady(user: User) {
@@ -543,15 +541,27 @@ export class Draft {
       await this.updateEmbedMessage()
 
       if (wasBelowCount && this.isAboveCount) {
-        const content = `The draft has enough players to begin, please hit "Ready" within the next ${this.readyWaitTime} minutes or be moved to the back of the queue.`
+        let diff = differenceInMilliseconds(new Date(), this.date)
+
+        let diffInMinutes = this.readyWaitTime
+
+        if (diff < 0) {
+          const end = addMilliseconds(addMinutes(new Date(), this.readyWaitTime), Math.abs(diff))
+
+          diffInMinutes = Math.ceil(differenceInSeconds(new Date(), end) / 60)
+        }
+
+        const content = `The draft has enough players to begin, please hit "Ready" within the next ${diffInMinutes} minutes or be moved to the back of the queue.`
 
         setTimeout(() => {
           this.usersInCount.forEach((u) => {
             if (!this.readyUsers.includes(u.id)) {
-              this.moveUserToBackOfQueue(user)
+              this.moveUserToBackOfQueue(u)
             }
           })
-        }, 5000)
+
+          this.updateEmbedMessage()
+        }, diffInMinutes * 60 * 1000)
 
         this.sendSignupPing(content)
       } else if (this.needsOneMorePlayer) {

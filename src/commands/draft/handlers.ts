@@ -1,8 +1,13 @@
+import { addMilliseconds, isBefore } from 'date-fns'
 import { CommandInteraction } from 'discord.js'
 import { addLossToPlayer, addWinToPlayer, getGuildSettings } from '../../firebase'
 import { userHasRole } from '../permissions'
 import { Draft } from './draft'
 import { addDraft, getDraft, removeDraft } from './registry'
+
+const winnerWaitTime = 3 * 60 * 1000
+
+const winnerTimestamps: { [k: string]: Date } = {}
 
 export async function handleDraftCreate(i: CommandInteraction) {
   if (getDraft(i)) {
@@ -61,11 +66,7 @@ export async function handleDraftCreate(i: CommandInteraction) {
 
         addDraft(draft)
 
-        await draft.loadSettings()
-
-        await draft.sendEmbedMessage()
-
-        await draft.save()
+        await draft.initializeNewDraft()
 
         await i.editReply({ content: 'Draft created' })
       } catch (e) {
@@ -115,20 +116,35 @@ export async function handleDraftReorderPlayer(i: CommandInteraction) {
 export async function handleDraftWinner(i: CommandInteraction) {
   const draft = getDraft(i)
 
-  if (draft) {
+  if (!i.guildId) {
+    i.reply({ content: 'Invalid guild id', ephemeral: true })
+  } else if (!draft) {
+    i.reply({ content: 'There is no active draft', ephemeral: true })
+  } else if (
+    winnerTimestamps[i.guildId] &&
+    isBefore(new Date(), addMilliseconds(winnerTimestamps[i.guildId], winnerWaitTime))
+  ) {
+    i.reply({ content: 'A winner has been declared recently, please wait', ephemeral: true })
+  } else {
     const team = i.options.getInteger('team', true)
 
     if (team === 1) {
-      draft.teams[0].forEach((u) => addWinToPlayer(u.id))
-      draft.teams[1].forEach((u) => addLossToPlayer(u.id))
-    } else if (team === 2) {
-      draft.teams[0].forEach((u) => addLossToPlayer(u.id))
       draft.teams[1].forEach((u) => addWinToPlayer(u.id))
+      draft.teams[2].forEach((u) => addLossToPlayer(u.id))
+    } else if (team === 2) {
+      draft.teams[1].forEach((u) => addLossToPlayer(u.id))
+      draft.teams[2].forEach((u) => addWinToPlayer(u.id))
+    }
+
+    if (i.guildId) {
+      winnerTimestamps[i.guildId] = new Date()
     }
 
     await i.reply({ content: `Team ${team} declared the winner!` })
-  } else {
-    i.reply({ content: 'There is no active draft' })
+
+    setTimeout(() => {
+      i.deleteReply()
+    }, winnerWaitTime)
   }
 }
 

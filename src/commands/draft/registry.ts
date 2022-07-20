@@ -79,9 +79,7 @@ export async function loadExistingDrafts(client: Client) {
           if (msg) {
             const draft = await deserializeDraft(guild, data)
 
-            await draft.loadSettings()
-
-            await draft.collectInteractions()
+            await draft.initializeExistingDraft()
 
             addDraft(draft)
           } else {

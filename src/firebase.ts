@@ -59,13 +59,23 @@ export async function getGuildSettings(guildId: string | null): Promise<Settings
 export async function addWinToPlayer(id: string) {
   const doc = players.doc(id)
 
-  doc.set({ wins: FieldValue.increment(1) }, { merge: true })
+  try {
+    doc.set({ wins: FieldValue.increment(1) }, { merge: true })
+  } catch (e) {
+    console.log(`Failed adding win to player ${id}`)
+    console.log(e)
+  }
 }
 
 export async function addLossToPlayer(id: string) {
   const doc = players.doc(id)
 
-  doc.set({ losses: FieldValue.increment(1) }, { merge: true })
+  try {
+    doc.set({ losses: FieldValue.increment(1) }, { merge: true })
+  } catch (e) {
+    console.log(`Failed adding loss to player ${id}`)
+    console.log(e)
+  }
 }
 
 // players.onSnapshot((snapshot) => {

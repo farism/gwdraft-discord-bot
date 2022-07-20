@@ -12,9 +12,9 @@ export async function handlePlayerStats(i: CommandInteraction) {
 
   const wins = data?.wins ?? 0
 
-  const losses = data?.losses ?? 1
+  const losses = data?.losses ?? 0
 
-  const winRate = (wins / (wins + losses)) * 100
+  const winRate = (wins / (wins + (losses || 1))) * 100
 
   const content = `Wins: ${wins} | Losses: ${losses} | Win Rate: ${winRate.toFixed(2)}%`
 

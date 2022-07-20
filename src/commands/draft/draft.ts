@@ -3,14 +3,12 @@ import {
   differenceInMilliseconds,
   formatDuration,
   intervalToDuration,
-  isAfter,
   subHours,
 } from 'date-fns'
 import { zonedTimeToUtc } from 'date-fns-tz'
 import {
   CommandInteraction,
   Guild,
-  GuildBasedChannel,
   MessageActionRow,
   MessageButton,
   MessageEmbed,
@@ -50,8 +48,6 @@ export interface DraftDoc extends DraftOptions {
   signupMessageId: string | null
   teams: { [k: number]: string[] | PartialUser[] }
   users: string[] | PartialUser[]
-  usersNotifiedOfCount: string[]
-  usersNotifiedOfReady: string[]
 }
 
 export function serializeDraft(draft: Draft) {
@@ -107,8 +103,6 @@ export async function deserializeDraft(guild: Guild, data: DraftDoc): Promise<Dr
   draft.embedMessageId = data.embedMessageId
   draft.readyUsers = data.readyUsers
   draft.signupMessageId = data.signupMessageId
-  draft.usersNotifiedOfCount = data.usersNotifiedOfCount
-  draft.usersNotifiedOfReady = data.usersNotifiedOfReady
 
   draft.addUsers(
     data.users.map((user) => {
@@ -158,8 +152,6 @@ export class Draft {
   teams: { [k: number]: User[] } = { 1: [], 2: [] }
   users: User[] = []
   nicknames: { [k: string]: string } = {}
-  usersNotifiedOfCount: string[] = []
-  usersNotifiedOfReady: string[] = []
 
   interaction?: CommandInteraction
 
@@ -194,28 +186,40 @@ export class Draft {
     this.interaction = interaction
   }
 
-  public async loadSettings() {
-    try {
-      this.settings = await getGuildSettings(this.guildId)
-    } catch (e) {
-      console.log(`Failed to load settings for guild ${this.guild?.name}`)
-    }
+  public async initializeNewDraft() {
+    await this.loadSettings()
+    await this.scheduleSignupPing()
+    await this.sendEmbedMessage()
+    await this.save()
   }
 
-  get guild(): Guild | undefined {
+  public async initializeExistingDraft() {
+    await this.loadSettings()
+    await this.collectInteractions()
+  }
+
+  public get guild(): Guild | undefined {
     return client.guilds.cache.get(this.guildId)
   }
 
-  get channel(): GuildBasedChannel | undefined {
+  public get channel() {
     const channel = this.guild?.channels.cache.get(this.channelId)
 
-    if (channel?.isText) {
+    if (channel?.isText()) {
       return channel
     }
   }
 
   private get signupDate() {
     return subHours(this.date, 1)
+  }
+
+  private get signupDateDiff() {
+    return
+  }
+
+  private get isPastSignupTime() {
+    return new Date() > this.signupDate
   }
 
   private get isPastStartTime() {
@@ -226,28 +230,34 @@ export class Draft {
     return this.usersInCount.length >= this.count
   }
 
-  private get canIndicateReady() {
-    return this.isPastStartTime && this.isAboveCount
+  private get needsOneMorePlayer() {
+    return this.users.length === this.count - 1
   }
 
-  private get allUsersReadyInCount() {
-    return this.usersInCount.filter((u) => this.readyUsers.includes(u.id)).length === this.count
+  private get canIndicateReady() {
+    return this.isPastStartTime && this.isAboveCount
   }
 
   private get usersInCount() {
     return this.users.slice(0, this.count)
   }
 
-  private get countdown() {
-    if (isAfter(new Date(), this.signupDate)) {
-      return 0
-    }
+  private scheduleSignupPing() {
+    const diff = differenceInMilliseconds(new Date(), this.signupDate)
 
-    return Math.abs(differenceInMilliseconds(new Date(), this.signupDate))
+    const timeout = diff < 0 ? Math.abs(diff) : 0
+
+    setTimeout(() => this.sendSignupPing('Sign-ups are open, register now!'), timeout)
   }
 
   private get countdownFormatted() {
-    const duration = intervalToDuration({ start: 0, end: this.countdown })
+    const start = differenceInMilliseconds(new Date(), this.signupDate)
+
+    if (start > 0) {
+      return ''
+    }
+
+    const duration = intervalToDuration({ start, end: 0 })
 
     const format = duration.hours || duration.minutes ? ['hours', 'minutes'] : ['seconds']
 
@@ -261,22 +271,6 @@ export class Draft {
     return this.readyUsers.find((id) => id === user.id) ? '✓ ' : ''
   }
 
-  private canUserSignup(user: User) {
-    return this.isUserTheHost(user) || new Date() > this.signupDate
-  }
-
-  private isUserNotifiedOfCount(user: User) {
-    return this.usersNotifiedOfCount.includes(user.id)
-  }
-
-  private isUserNotifiedOReady(user: User) {
-    return this.usersNotifiedOfReady.includes(user.id)
-  }
-
-  private isUserTheHost(user: User) {
-    return this.hostId === user.id
-  }
-
   private isUserInDraft(user: User) {
     return this.users.findIndex((u) => u.id === user.id) >= 0
   }
@@ -285,8 +279,18 @@ export class Draft {
     return !!this.teams[team]?.find((u) => u.id === user.id)
   }
 
-  private isUserReady(user: User) {
-    return this.readyUsers.includes(user.id)
+  private async loadSettings() {
+    try {
+      this.settings = await getGuildSettings(this.guildId)
+    } catch (e) {
+      console.log(`Failed to load settings for guild ${this.guild?.name}`)
+    }
+  }
+
+  private async getMessage(id: string | null) {
+    if (this.guild && id) {
+      return await getMessage(this.guild, this.channelId, id)
+    }
   }
 
   private async getNickname(user: User) {
@@ -297,12 +301,6 @@ export class Draft {
     }
 
     return member?.nickname || user.username
-  }
-
-  private async getMessage(id: string | null) {
-    if (this.guild && id) {
-      return await getMessage(this.guild, this.channelId, id)
-    }
   }
 
   private createComponents() {
@@ -321,13 +319,13 @@ export class Draft {
       new MessageButton()
         .setCustomId('join')
         .setLabel('Join')
-        .setStyle(this.countdown > 0 ? 'SECONDARY' : 'PRIMARY')
-        .setDisabled(this.countdown > 0),
+        .setStyle(!this.isPastSignupTime ? 'SECONDARY' : 'PRIMARY')
+        .setDisabled(!this.isPastSignupTime),
       new MessageButton()
         .setCustomId('leave')
         .setLabel('Leave')
         .setStyle('SECONDARY')
-        .setDisabled(this.countdown > 0),
+        .setDisabled(!this.isPastSignupTime),
     )
 
     return row
@@ -354,7 +352,7 @@ export class Draft {
 
     embed.addField('Start Time', this.isPastStartTime ? 'In Progress' : `<t:${time}>`)
 
-    if (this.countdown > 0) {
+    if (!this.isPastSignupTime) {
       embed.addField('Sign-ups Start In', this.countdownFormatted)
     }
 
@@ -366,7 +364,6 @@ export class Draft {
 
     embed
       .addField('Player Count', String(this.count))
-      // .addField(`${month} Flux - ${flux.name}`, `${flux.description} [wiki](${flux.link})`)
       .addField('Host', `<@${this.hostId}>`)
       .addField('\u200b', '-----')
       .addField('Signups', `${signups.length ? signups.join('\n') : 'None'}`)
@@ -405,89 +402,31 @@ export class Draft {
     await this.updateEmbedMessage()
   }
 
-  private async sendSignupPingToChannel() {
+  private async sendSignupPing(content: string) {
     if (!this.settings?.draft_player_role || this.skipSignupPing) {
       return
     }
 
-    const message = await this.getMessage(this.embedMessageId)
+    if (this.signupMessageId) {
+      const msg = await this.getMessage(this.signupMessageId)
+
+      if (msg?.deletable) {
+        msg.delete()
+      }
+    }
 
     try {
-      const signupMsg = await message?.channel.send(
-        `Draft starting, sign up now! <@&${this.settings.draft_player_role}>`,
+      const signupMsg = await this.channel?.send(
+        `${content} <@&${this.settings.draft_player_role}>`,
       )
 
       this.signupMessageId = signupMsg?.id || null
 
       this.save()
     } catch (e) {
-      console.log(`Failed to send signup notification message to channel ${message?.channel.id}`)
+      console.log(`Failed to send sign-up notification message to  #${this.channel?.name}`)
       console.log(e)
     }
-  }
-
-  // private async notifyCountHasFilled() {
-  //   const users = this.usersInCount.filter((u) => !this.isUserNotifiedOReady(u))
-
-  //   users.forEach((u) => this.usersNotifiedOfReady.push(u.id))
-
-  //   for (let user of users) {
-  //     try {
-  //       await user
-  //         .send(
-  //           [`The players in the draft count are all ready, please meet in ${this.location}`].join(
-  //             '\n\n',
-  //           ),
-  //         )
-  //         .then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
-  //     } catch (e) {
-  //       console.log(`Failed to send all ready DM to ${user.username}`)
-  //       console.log(e)
-  //     }
-  //   }
-  // }
-
-  // private async notifyAllPlayersAreReady() {
-  //   const users = this.usersInCount.filter((u) => !this.isUserNotifiedOfCount(u))
-
-  //   users.forEach((u) => this.usersNotifiedOfCount.push(u.id))
-
-  //   for (let user of users) {
-  //     try {
-  //       await user
-  //         .send(
-  //           [`The draft has enough players, please indicate if you are ready to play`].join('\n\n'),
-  //         )
-  //         .then((m) => setTimeout(() => m.delete(), 5 * 60 * 1000))
-  //     } catch (e) {
-  //       console.log(`Failed to send ready check DM to ${user.username}`)
-  //       console.log(e)
-  //     }
-
-  //     setTimeout(() => {
-  //       if (!this.isUserReady(user) && this.usersInCount.length > this.count) {
-  //         this.moveUserToBackOfQueue(user)
-  //       }
-  //     }, this.readyWaitTime * 60 * 1000)
-  //   }
-  // }
-
-  private async dmUsers() {
-    // const prevUsersNotifiedOfCount = this.usersNotifiedOfCount.length
-    // const prevUsersNotifiedOfReady = this.usersNotifiedOfReady.length
-    // try {
-    //   if (this.hasAboveCount && this.allUsersReadyInCount) {
-    //     await this.notifyAllPlayersAreReady()
-    //   } else if (this.isPastStartTime && this.hasAboveCount) {
-    //     await this.notifyCountHasFilled()
-    //   }
-    // } catch (e) {}
-    // if (
-    //   prevUsersNotifiedOfCount !== this.usersNotifiedOfCount.length ||
-    //   prevUsersNotifiedOfReady !== this.usersNotifiedOfReady.length
-    // ) {
-    //   this.save()
-    // }
   }
 
   public async collectInteractions() {
@@ -604,7 +543,21 @@ export class Draft {
       await this.updateEmbedMessage()
 
       if (wasBelowCount && this.isAboveCount) {
-        this.sendSignupPingToChannel()
+        const content = `The draft has enough players to begin, please hit "Ready" within the next ${this.readyWaitTime} minutes or be moved to the back of the queue.`
+
+        setTimeout(() => {
+          this.usersInCount.forEach((u) => {
+            if (!this.readyUsers.includes(u.id)) {
+              this.moveUserToBackOfQueue(user)
+            }
+          })
+        }, 5000)
+
+        this.sendSignupPing(content)
+      } else if (this.needsOneMorePlayer) {
+        const content = `Draft is close to filling (${this.count - 1}/${this.count}) Join now!`
+
+        this.sendSignupPing(content)
       }
     }
   }
@@ -617,6 +570,16 @@ export class Draft {
     this.readyUsers = this.readyUsers.filter((id) => id != user.id)
 
     Object.keys(this.teams).forEach((key) => this.removeUserFromTeam(user, parseInt(key, 10)))
+
+    if (this.needsOneMorePlayer) {
+      const content = `Draft is close to filling (${this.count - 1}/${this.count}) Join now!`
+
+      this.sendSignupPing(content)
+    } else if (wasAboveCount) {
+      this.usersInCount[this.usersInCount.length - 1]?.send(
+        `You are now in the draft count, please be ready within ${this.readyWaitTime} minutes`,
+      )
+    }
 
     await this.updateEmbedMessage()
   }
@@ -716,6 +679,12 @@ export class Draft {
     this.canceled = true
 
     this.save()
+
+    setTimeout(() => {
+      if (message?.deletable) {
+        message.delete()
+      }
+    }, 10000)
   }
 
   public async save() {

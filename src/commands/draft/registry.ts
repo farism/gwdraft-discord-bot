@@ -31,17 +31,6 @@ export function removeDraft(draft: Draft) {
   delete draftRegistry[draft.guildId]
 }
 
-export async function updateDrafts() {
-  try {
-    for (let draft of Object.values(draftRegistry)) {
-      await draft.updateEmbedMessage(false)
-    }
-  } catch (e) {
-    console.warn('Could not update draft')
-    console.log(e)
-  }
-}
-
 export async function getMessage(guild: Guild, channelId: string, messageId: string) {
   try {
     const channel = guild.channels.cache.get(channelId) || (await guild.channels.fetch(channelId))

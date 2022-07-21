@@ -170,7 +170,7 @@ export async function handleDraftEdit(i: CommandInteraction) {
       draft.description = description
     }
 
-    draft.updateEmbedMessage()
+    draft.updateEmbedMessageDebounced()
   }
 
   await i.reply({ content: `Draft edited`, ephemeral: true })

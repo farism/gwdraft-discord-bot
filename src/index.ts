@@ -1,7 +1,7 @@
 import { Interaction } from 'discord.js'
 import dotenv from 'dotenv'
 import { setupClient } from './client'
-import { loadExistingDrafts, updateDrafts } from './commands/draft/registry'
+import { loadExistingDrafts } from './commands/draft/registry'
 import { getInteractionHandler } from './commands/getHandler'
 import { checkDraftModerator } from './commands/permissions'
 import { logCommand, sendAuditLogMessage } from './logging'
@@ -40,7 +40,5 @@ async function handleInteractions(i: Interaction) {
     await loadExistingDrafts(client)
 
     client.on('interactionCreate', handleInteractions)
-
-    setInterval(() => updateDrafts(), 5000)
   })
 })()

@@ -9,6 +9,7 @@ import {
   intervalToDuration,
   subHours,
 } from 'date-fns'
+import debounce from 'lodash.debounce'
 import { zonedTimeToUtc } from 'date-fns-tz'
 import {
   CommandInteraction,
@@ -157,7 +158,10 @@ export class Draft {
   users: User[] = []
   nicknames: { [k: string]: string } = {}
 
+  updateTimer: NodeJS.Timeout | null = null
   interaction?: CommandInteraction
+  updateEmbedMessageDebounced: () => void = () => {}
+  sendPingDebounced: (string: string) => void = () => {}
 
   constructor({
     hostId,
@@ -188,6 +192,17 @@ export class Draft {
     this.skipSignupPing = skipSignupPing
     this.time = time
     this.interaction = interaction
+
+    this.updateEmbedMessageDebounced = debounce(this.updateEmbedMessage, 5000, {
+      leading: true,
+      trailing: true,
+    })
+
+    this.sendPingDebounced = debounce(this.sendSignupPing, 30000, {
+      maxWait: 60000,
+      leading: true,
+      trailing: true,
+    })
   }
 
   public async initializeNewDraft() {
@@ -247,24 +262,7 @@ export class Draft {
 
     const timeout = diff < 0 ? Math.abs(diff) : 0
 
-    setTimeout(() => this.sendSignupPing('Sign-ups are open, register now!'), timeout)
-  }
-
-  private get countdownFormatted() {
-    const diff = differenceInMilliseconds(new Date(), this.signupDate)
-
-    if (diff > 0) {
-      return ''
-    }
-
-    const duration = intervalToDuration({ start: diff, end: 0 })
-
-    const format = duration.hours || duration.minutes ? ['hours', 'minutes'] : ['seconds']
-
-    return formatDuration(duration, {
-      zero: true,
-      format,
-    })
+    setTimeout(() => this.sendPingDebounced('Sign-ups are open, register now!'), timeout)
   }
 
   private formatReady(user: User) {
@@ -350,11 +348,10 @@ export class Draft {
 
     const embed = new MessageEmbed()
 
-    embed.addField('Start Time', this.isPastStartTime ? 'In Progress' : `<t:${time}>`)
-
-    if (!this.isPastSignupTime) {
-      embed.addField('Sign-ups Start In', this.countdownFormatted)
-    }
+    embed.addField(
+      'Start Time',
+      this.isPastStartTime ? `~~<t:${time}>~~ In Progress` : '<t:${time}>',
+    )
 
     embed.addField('Meeting Location', this.location)
 
@@ -388,6 +385,8 @@ export class Draft {
     this.users = this.users.filter((u) => u.id !== user.id)
 
     this.users.push(user)
+
+    this.save()
   }
 
   private async toggleReady(user: User) {
@@ -397,7 +396,7 @@ export class Draft {
       this.readyUsers = [...this.readyUsers, user.id]
     }
 
-    await this.updateEmbedMessage()
+    this.save()
   }
 
   private async sendSignupPing(content: string) {
@@ -437,25 +436,38 @@ export class Draft {
       })
 
       collector.on('collect', async (i) => {
-        console.log('Received interaction', i.user.username, i.customId)
+        const name = await this.getNickname(i.user)
 
         if (i.customId === 'join') {
           if (this.isUserInDraft(i.user)) {
-            i.reply({ content: 'You have already joined the draft', ephemeral: true })
+            await i.reply({ content: `${name} has already joined the draft` })
           } else {
-            this.addUser(i.user)
+            await this.addUser(i.user)
 
-            i.reply({ content: 'You have joined the draft', ephemeral: true })
+            await i.reply({ content: `${name} has joined the draft!` })
           }
         } else if (i.customId === 'leave') {
-          this.removeUser(i.user)
+          await this.removeUser(i.user)
 
-          i.reply({ content: 'You have left the draft', ephemeral: true })
+          i.reply({ content: `${name} has left the draft` })
         } else if (i.customId === 'ready') {
-          this.toggleReady(i.user)
+          await this.toggleReady(i.user)
 
-          i.reply({ content: 'You have changed your ready status', ephemeral: true })
+          const isReady = this.readyUsers.includes(i.user.id)
+
+          await i.reply({
+            content: `${name} is ${isReady ? 'ready' : 'not ready'}`,
+          })
         }
+
+        setTimeout(async () => {
+          try {
+            i.deleteReply()
+          } catch (e) {
+            console.log('Could not delete interaction reply')
+            console.log(e)
+          }
+        }, 5000)
       })
     }
   }
@@ -480,7 +492,9 @@ export class Draft {
     }
   }
 
-  public async updateEmbedMessage(save: boolean = true) {
+  public async updateEmbedMessage() {
+    console.log('updating message embed')
+
     try {
       const message = await this.getMessage(this.embedMessageId)
 
@@ -491,18 +505,14 @@ export class Draft {
           embeds: [embed],
           components: [this.createComponents()],
         })
+
+        await message?.edit({
+          embeds: [embed],
+          components: [this.createComponents()],
+        })
       }
     } catch (e) {
       console.log('Failed to update message')
-      console.log(e)
-    }
-
-    try {
-      if (save) {
-        await this.save()
-      }
-    } catch (e) {
-      console.log('Save after update failed')
       console.log(e)
     }
   }
@@ -538,7 +548,7 @@ export class Draft {
 
       this.nicknames[user.id] = await this.getNickname(user)
 
-      await this.updateEmbedMessage()
+      this.save()
 
       if (wasBelowCount && this.isAboveCount) {
         let diff = differenceInMilliseconds(new Date(), this.date)
@@ -559,15 +569,13 @@ export class Draft {
               this.moveUserToBackOfQueue(u)
             }
           })
-
-          this.updateEmbedMessage()
         }, diffInMinutes * 60 * 1000)
 
-        this.sendSignupPing(content)
+        this.sendPingDebounced(content)
       } else if (this.needsOneMorePlayer) {
         const content = `Draft is close to filling (${this.count - 1}/${this.count}) Join now!`
 
-        this.sendSignupPing(content)
+        this.sendPingDebounced(content)
       }
     }
   }
@@ -579,19 +587,25 @@ export class Draft {
 
     this.readyUsers = this.readyUsers.filter((id) => id != user.id)
 
-    Object.keys(this.teams).forEach((key) => this.removeUserFromTeam(user, parseInt(key, 10)))
+    Object.keys(this.teams).forEach((key) => {
+      const team = parseInt(key, 10)
+
+      this.teams[team] = this.teams[team]?.filter((u) => u.id !== user.id) ?? []
+    })
 
     if (this.needsOneMorePlayer) {
       const content = `Draft is close to filling (${this.count - 1}/${this.count}) Join now!`
 
       this.sendSignupPing(content)
     } else if (wasAboveCount) {
-      this.usersInCount[this.usersInCount.length - 1]?.send(
+      const nextUser = this.usersInCount[this.usersInCount.length - 1]
+
+      nextUser?.send(
         `You are now in the draft count, please be ready within ${this.readyWaitTime} minutes`,
       )
     }
 
-    await this.updateEmbedMessage()
+    this.save()
   }
 
   public async reorderUser(user: User, position: number) {
@@ -599,7 +613,7 @@ export class Draft {
 
     this.users.splice(position, 0, user)
 
-    await this.updateEmbedMessage()
+    this.save()
   }
 
   public async setTeamCaptain(user: User, team: number) {
@@ -607,7 +621,7 @@ export class Draft {
       this.teams[team]?.unshift(user)
     }
 
-    await this.updateEmbedMessage()
+    this.save()
   }
 
   public async addUserToTeam(user: User, team: number) {
@@ -615,13 +629,13 @@ export class Draft {
       this.teams[team]?.push(user)
     }
 
-    await this.updateEmbedMessage()
+    this.save()
   }
 
   public async removeUserFromTeam(user: User, team: number) {
     this.teams[team] = this.teams[team]?.filter((u) => u.id !== user.id) ?? []
 
-    await this.updateEmbedMessage()
+    this.save()
   }
 
   public async swapUserTeam(user: User) {
@@ -633,7 +647,7 @@ export class Draft {
       this.addUserToTeam(user, 1)
     }
 
-    await this.updateEmbedMessage()
+    this.save()
   }
 
   public async addUserToCaptainsTeam(captain: User, user: User) {
@@ -643,7 +657,7 @@ export class Draft {
       this.addUserToTeam(user, 2)
     }
 
-    await this.updateEmbedMessage()
+    this.save()
   }
 
   public async removeUserFromCaptainsTeam(captain: User, user: User) {
@@ -653,7 +667,7 @@ export class Draft {
       this.removeUserFromTeam(user, 2)
     }
 
-    await this.updateEmbedMessage()
+    this.save()
   }
 
   // for hydrating a persisted draft
@@ -665,8 +679,6 @@ export class Draft {
         this.nicknames[user.id] = await this.getNickname(user)
       }
     }
-
-    await this.updateEmbedMessage()
   }
 
   public async cancel(canceler: User) {
@@ -700,8 +712,12 @@ export class Draft {
   public async save() {
     const doc = serializeDraft(this)
 
+    console.log('save')
+
     try {
       await drafts.doc(this.guildId).set(doc, { merge: true })
+
+      this.updateEmbedMessageDebounced()
     } catch (e) {
       console.log('Draft failed to save')
       console.log(e)
@@ -711,6 +727,12 @@ export class Draft {
   public async start() {
     this.readyUsers = []
 
-    await this.updateEmbedMessage()
+    this.save()
+  }
+
+  public async reset() {
+    this.teams = [[], []]
+
+    this.save()
   }
 }

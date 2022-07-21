@@ -111,10 +111,7 @@ export async function handleTeamReset(i: CommandInteraction) {
   const draft = getDraft(i)
 
   if (draft) {
-    draft.teams = [[], []]
-
-    draft.updateEmbedMessage()
-
+    draft.reset()
     await i.reply({ content: `The teams have been reset` })
   } else {
     await i.reply({ content: `There is no active draft`, ephemeral: true })

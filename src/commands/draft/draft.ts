@@ -350,7 +350,7 @@ export class Draft {
 
     embed.addField(
       'Start Time',
-      this.isPastStartTime ? `~~<t:${time}>~~ In Progress` : '<t:${time}>',
+      this.isPastStartTime ? `~~<t:${time}>~~ In Progress` : `<t:${time}>`,
     )
 
     embed.addField('Meeting Location', this.location)
@@ -440,34 +440,30 @@ export class Draft {
 
         if (i.customId === 'join') {
           if (this.isUserInDraft(i.user)) {
-            await i.reply({ content: `${name} has already joined the draft` })
+            await i.reply({ content: `You have already joined the draft`, ephemeral: true })
           } else {
             await this.addUser(i.user)
 
-            await i.reply({ content: `${name} has joined the draft!` })
+            await i.reply({ content: `You have joined the draft!`, ephemeral: true })
           }
         } else if (i.customId === 'leave') {
           await this.removeUser(i.user)
 
-          i.reply({ content: `${name} has left the draft` })
+          i.reply({ content: `You have left the draft`, ephemeral: true })
         } else if (i.customId === 'ready') {
           await this.toggleReady(i.user)
 
-          const isReady = this.readyUsers.includes(i.user.id)
-
-          await i.reply({
-            content: `${name} is ${isReady ? 'ready' : 'not ready'}`,
-          })
+          await i.reply({ content: 'You have toggled ready state', ephemeral: true })
         }
 
-        setTimeout(async () => {
-          try {
-            i.deleteReply()
-          } catch (e) {
-            console.log('Could not delete interaction reply')
-            console.log(e)
-          }
-        }, 5000)
+        // setTimeout(async () => {
+        //   try {
+        //     i.deleteReply()
+        //   } catch (e) {
+        //     console.log('Could not delete interaction reply')
+        //     console.log(e)
+        //   }
+        // }, 1000)
       })
     }
   }
@@ -493,8 +489,6 @@ export class Draft {
   }
 
   public async updateEmbedMessage() {
-    console.log('updating message embed')
-
     try {
       const message = await this.getMessage(this.embedMessageId)
 
@@ -711,8 +705,6 @@ export class Draft {
 
   public async save() {
     const doc = serializeDraft(this)
-
-    console.log('save')
 
     try {
       await drafts.doc(this.guildId).set(doc, { merge: true })

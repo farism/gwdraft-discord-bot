@@ -1,15 +1,4 @@
-import {
-  addDays,
-  addMilliseconds,
-  addMinutes,
-  differenceInMilliseconds,
-  differenceInMinutes,
-  differenceInSeconds,
-  formatDuration,
-  intervalToDuration,
-  subHours,
-} from 'date-fns'
-import debounce from 'lodash.debounce'
+import { addDays, differenceInMilliseconds, subHours } from 'date-fns'
 import { zonedTimeToUtc } from 'date-fns-tz'
 import {
   CommandInteraction,
@@ -19,6 +8,7 @@ import {
   MessageEmbed,
   User,
 } from 'discord.js'
+import debounce from 'lodash.debounce'
 import { client } from '../../client'
 import { drafts, getGuildSettings, players, Settings } from '../../firebase'
 import { defaultPlayerCount } from '../../helpers/constants'
@@ -304,14 +294,14 @@ export class Draft {
   private createComponents() {
     const row = new MessageActionRow()
 
-    row.addComponents(
-      new MessageButton()
-        .setCustomId('ready')
-        .setLabel('Ready')
-        .setStyle('SUCCESS')
-        .setEmoji('✅')
-        .setDisabled(!this.canIndicateReady),
-    )
+    // row.addComponents(
+    //   new MessageButton()
+    //     .setCustomId('ready')
+    //     .setLabel('Ready')
+    //     .setStyle('SUCCESS')
+    //     .setEmoji('✅')
+    //     .setDisabled(!this.canIndicateReady),
+    // )
 
     row.addComponents(
       new MessageButton()
@@ -545,25 +535,26 @@ export class Draft {
       this.save()
 
       if (wasBelowCount && this.isAboveCount) {
-        let diff = differenceInMilliseconds(new Date(), this.date)
+        // let diff = differenceInMilliseconds(new Date(), this.date)
 
-        let diffInMinutes = this.readyWaitTime
+        // let diffInMinutes = this.readyWaitTime
 
-        if (diff < 0) {
-          const end = addMilliseconds(addMinutes(new Date(), this.readyWaitTime), Math.abs(diff))
+        // if (diff < 0) {
+        //   const end = addMilliseconds(addMinutes(new Date(), this.readyWaitTime), Math.abs(diff))
 
-          diffInMinutes = Math.ceil(differenceInSeconds(new Date(), end) / 60)
-        }
+        //   diffInMinutes = Math.ceil(differenceInSeconds(new Date(), end) / 60)
+        // }
 
-        const content = `The draft has enough players to begin, please hit "Ready" within the next ${diffInMinutes} minutes or be moved to the back of the queue.`
+        // const content = `The draft has enough players to begin, please hit "Ready" within the next ${diffInMinutes} minutes or be moved to the back of the queue.`
+        const content = `The draft has enough players to begin.`
 
-        setTimeout(() => {
-          this.usersInCount.forEach((u) => {
-            if (!this.readyUsers.includes(u.id)) {
-              this.moveUserToBackOfQueue(u)
-            }
-          })
-        }, diffInMinutes * 60 * 1000)
+        // setTimeout(() => {
+        //   this.usersInCount.forEach((u) => {
+        //     if (!this.readyUsers.includes(u.id)) {
+        //       this.moveUserToBackOfQueue(u)
+        //     }
+        //   })
+        // }, diffInMinutes * 60 * 1000)
 
         this.sendPingDebounced(content)
       } else if (this.needsOneMorePlayer) {
@@ -592,11 +583,10 @@ export class Draft {
 
       this.sendSignupPing(content)
     } else if (wasAboveCount) {
-      const nextUser = this.usersInCount[this.usersInCount.length - 1]
-
-      nextUser?.send(
-        `You are now in the draft count, please be ready within ${this.readyWaitTime} minutes`,
-      )
+      // const nextUser = this.usersInCount[this.usersInCount.length - 1]
+      // nextUser?.send(
+      //   `You are now in the draft count, please be ready within ${this.readyWaitTime} minutes`,
+      // )
     }
 
     this.save()
@@ -605,7 +595,7 @@ export class Draft {
   public async reorderUser(user: User, position: number) {
     this.users = this.users.filter((u) => u.id !== user.id)
 
-    this.users.splice(position, 0, user)
+    this.users.splice(position - 1, 0, user)
 
     this.save()
   }

@@ -108,7 +108,7 @@ export async function handleDraftReorderPlayer(i: CommandInteraction) {
 
   const position = i.options.getInteger('position', true)
 
-  getDraft(i)?.reorderUser(user, position + 1)
+  getDraft(i)?.reorderUser(user, position)
 
   await i.reply({ content: `Player moved`, ephemeral: true })
 }

@@ -148,6 +148,7 @@ export class Draft {
   users: User[] = []
   nicknames: { [k: string]: string } = {}
 
+  registrationTimer: NodeJS.Timeout | null = null
   updateTimer: NodeJS.Timeout | null = null
   interaction?: CommandInteraction
   updateEmbedMessageDebounced: () => void = () => {}
@@ -189,9 +190,9 @@ export class Draft {
     })
 
     this.sendPingDebounced = debounce(this.sendSignupPing, 30000, {
-      maxWait: 60000,
-      leading: true,
-      trailing: true,
+      maxWait: 15 * 60 * 1000, // only allow signup ping every 15 min
+      leading: false,
+      trailing: false,
     })
   }
 
@@ -252,7 +253,10 @@ export class Draft {
 
     const timeout = diff < 0 ? Math.abs(diff) : 0
 
-    setTimeout(() => this.sendPingDebounced('Sign-ups are open, register now!'), timeout)
+    this.registrationTimer = setTimeout(
+      () => this.sendSignupPing('Sign-ups are open, register now!'),
+      timeout,
+    )
   }
 
   private formatReady(user: User) {
@@ -437,9 +441,13 @@ export class Draft {
             await i.reply({ content: `You have joined the draft!`, ephemeral: true })
           }
         } else if (i.customId === 'leave') {
-          await this.removeUser(i.user)
+          if (this.isUserInDraft(i.user)) {
+            await this.removeUser(i.user)
 
-          i.reply({ content: `You have left the draft`, ephemeral: true })
+            i.reply({ content: `You have left the draft`, ephemeral: true })
+          } else {
+            await i.reply({ content: `You are not in the draft`, ephemeral: true })
+          }
         } else if (i.customId === 'ready') {
           await this.toggleReady(i.user)
 
@@ -581,7 +589,7 @@ export class Draft {
     if (this.needsOneMorePlayer) {
       const content = `Draft is close to filling (${this.count - 1}/${this.count}) Join now!`
 
-      this.sendSignupPing(content)
+      this.sendPingDebounced(content)
     } else if (wasAboveCount) {
       // const nextUser = this.usersInCount[this.usersInCount.length - 1]
       // nextUser?.send(
@@ -666,13 +674,17 @@ export class Draft {
   }
 
   public async cancel(canceler: User) {
+    if (this.registrationTimer) {
+      clearTimeout(this.registrationTimer)
+    }
+
     const message = await this.getMessage(this.embedMessageId)
 
     const signupMessage = await this.getMessage(this.signupMessageId)
 
     if (message?.editable) {
       message.edit({
-        content: `~~<@${this.hostId}> has started a draft~~\n\nDraft has been canceled by <@${canceler.id}>`,
+        content: `Draft has been canceled by <@${canceler.id}>`,
         embeds: [],
         components: [],
       })

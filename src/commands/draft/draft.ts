@@ -337,7 +337,9 @@ export class Draft {
 
       const nickname = this.nicknames[user.id] ?? user.username
 
-      signups.push(`${divider(i)}${i + 1}. ${this.formatReady(user)}${nickname}${ign}`)
+      const str = `${divider(i)}${i + 1}. ${this.formatReady(user)}${nickname}${ign}`
+
+      signups.push(str.replace(/_/g, '\\_'))
     }
 
     const embed = new MessageEmbed()
@@ -430,8 +432,6 @@ export class Draft {
       })
 
       collector.on('collect', async (i) => {
-        const name = await this.getNickname(i.user)
-
         if (i.customId === 'join') {
           if (this.isUserInDraft(i.user)) {
             await i.reply({ content: `You have already joined the draft`, ephemeral: true })

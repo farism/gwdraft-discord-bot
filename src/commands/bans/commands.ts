@@ -1,21 +1,23 @@
 import { SlashCommandBuilder } from '@discordjs/builders'
-import { CacheType, CommandInteraction } from 'discord.js'
 
 export const banCmd = new SlashCommandBuilder()
-  .setName('bans')
+  .setName('c')
   .setDescription(`Manage bans`)
-  .addSubcommand((subcommand) => subcommand.setName('player').setDescription('Ban a player'))
   .addSubcommand((subcommand) =>
     subcommand
-      .setName('skill')
-      .setDescription('Ban a skill')
-      .addIntegerOption((option) =>
+      .setName('ban')
+      .setDescription('Ban or unban a player')
+      .addUserOption((option) =>
         // prettier-ignore
         option
-          .setName('count')
-          .setDescription('max number of skill on team')
-          .setRequired(true),
+          .setName('user')
+          .setDescription('The player to ban or unban'),
+      )
+      .addStringOption((option) =>
+        // prettier-ignore
+        option
+          .setName('reason')
+          .setDescription('The reason the player is banned'),
       ),
   )
-  .addSubcommand((subcommand) => subcommand.setName('flux').setDescription('Ban a flux'))
-  .addSubcommand((subcommand) => subcommand.setName('schedule').setDescription('Schedule bans'))
+  .addSubcommand((subcommand) => subcommand.setName('unba').setDescription('Ban a player'))

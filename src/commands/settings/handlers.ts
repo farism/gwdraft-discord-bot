@@ -1,5 +1,5 @@
 import { CommandInteraction } from 'discord.js'
-import { settings } from '../../firebase'
+import { getGuildSettings, settings } from '../../firebase'
 import { userHasRole } from '../permissions'
 
 export async function handleSettings(i: CommandInteraction) {
@@ -7,7 +7,12 @@ export async function handleSettings(i: CommandInteraction) {
     return
   }
 
-  if (!userHasRole(i.guild, i.user, 'admin')) {
+  const s = await getGuildSettings(i.guildId)
+
+  const hasAdminRole = userHasRole(i.guild, i.user.id, s?.admin_role || '0')
+
+  if (i.guild?.ownerId !== i.user.id && !hasAdminRole) {
+    i.reply({ content: `You must be the server owner or have an admin role`, ephemeral: true })
     return
   }
 

@@ -31,12 +31,6 @@ export const draftCmd = new SlashCommandBuilder()
           .setName('description')
           .setDescription('Adds a description to the draft'),
       )
-      .addIntegerOption((option) =>
-        // prettier-ignore
-        option
-          .setName('ready_wait_time')
-          .setDescription('How much time a player has to check ready before moving to end of queue, in minutes (default = 5)'),
-      )
       .addBooleanOption((option) =>
         // prettier-ignore
         option
@@ -45,30 +39,73 @@ export const draftCmd = new SlashCommandBuilder()
       ),
   )
   .addSubcommand((subcommand) =>
-    subcommand.setName('start').setDescription('Begin the draft once all players are ready'),
-  )
-  .addSubcommand((subcommand) =>
     subcommand
-      .setName('add_player')
-      .setDescription('Manually add a player to the draft')
+      .setName('add_players')
+      .setDescription('Manually add players to the draft')
       .addUserOption((option) =>
         // prettier-ignore
         option
-          .setName('user')
-          .setDescription('The player to add')
-          .setRequired(true),
+          .setName('user1')
+          .setDescription('A player to add'),
+      )
+      .addUserOption((option) =>
+        // prettier-ignore
+        option
+          .setName('user2')
+          .setDescription('A player to add'),
+      )
+      .addUserOption((option) =>
+        // prettier-ignore
+        option
+          .setName('user3')
+          .setDescription('A player to add'),
+      )
+      .addUserOption((option) =>
+        // prettier-ignore
+        option
+          .setName('user4')
+          .setDescription('A player to add'),
+      )
+      .addUserOption((option) =>
+        // prettier-ignore
+        option
+          .setName('user5')
+          .setDescription('A player to add'),
       ),
   )
   .addSubcommand((subcommand) =>
     subcommand
-      .setName('remove_player')
-      .setDescription('Manually remove a player from the draft')
+      .setName('remove_players')
+      .setDescription('Manually remove players from the draft')
       .addUserOption((option) =>
         // prettier-ignore
         option
-          .setName('user')
-          .setDescription('The player to remove')
-          .setRequired(true),
+          .setName('user1')
+          .setDescription('A player to remove'),
+      )
+      .addUserOption((option) =>
+        // prettier-ignore
+        option
+          .setName('user2')
+          .setDescription('A player to remove'),
+      )
+      .addUserOption((option) =>
+        // prettier-ignore
+        option
+          .setName('user3')
+          .setDescription('A player to remove'),
+      )
+      .addUserOption((option) =>
+        // prettier-ignore
+        option
+          .setName('user4')
+          .setDescription('A player to remove'),
+      )
+      .addUserOption((option) =>
+        // prettier-ignore
+        option
+          .setName('user5')
+          .setDescription('A player to remove'),
       ),
   )
   .addSubcommand((subcommand) =>

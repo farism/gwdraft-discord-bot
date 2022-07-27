@@ -40,6 +40,7 @@ export function defaultRanks(rank: number = 0): Rankings {
 }
 
 export interface Settings {
+  admin_role?: string
   draft_channel?: string
   draft_audit_log_channel?: string
   draft_moderator_role?: string

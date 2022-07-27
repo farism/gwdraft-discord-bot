@@ -3,6 +3,12 @@ import { SlashCommandBuilder } from '@discordjs/builders'
 export const settingsCmd = new SlashCommandBuilder()
   .setName('settings')
   .setDescription(`Manage settings`)
+  .addRoleOption((option) =>
+    // prettier-ignore
+    option
+      .setName('admin_role')
+      .setDescription('Admin role for adjusting settings'),
+  )
   .addChannelOption((option) =>
     // prettier-ignore
     option

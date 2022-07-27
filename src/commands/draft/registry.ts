@@ -55,18 +55,25 @@ export async function loadExistingDrafts(client: Client) {
 
   for (let [key, guild] of client.guilds.cache) {
     try {
-      const doc = await drafts.doc(guild.id).get()
+      const query = await drafts
+        .where('guildId', '==', guild.id)
+        .where('canceledAt', '==', null)
+        .orderBy('createdAt', 'desc')
+        .limit(1)
+        .get()
 
-      const data = doc.data() as DraftDoc
+      const doc = query.docs[0]
 
-      if (data) {
-        if (data.canceled) {
+      if (doc) {
+        const data = doc.data() as DraftDoc
+
+        if (data.canceledAt) {
           console.log(`The draft in ${guild.name} has been canceled`)
         } else {
           const msg = await getMessage(guild, data.channelId, data.embedMessageId)
 
           if (msg) {
-            const draft = await deserializeDraft(guild, data)
+            const draft = await deserializeDraft(guild, doc.id, data)
 
             await draft.initializeExistingDraft()
 

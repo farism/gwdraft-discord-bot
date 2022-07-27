@@ -13,6 +13,12 @@ export const templatesCmd = new SlashCommandBuilder()
           .setName('code')
           .setDescription('A skill template')
           .setRequired(true),
+      )
+      .addBooleanOption((option) =>
+        // prettier-ignore
+        option
+          .setName('hide_skill_info')
+          .setDescription('Hide the info for skills'),
       ),
   )
   .addSubcommand((subcommand) =>

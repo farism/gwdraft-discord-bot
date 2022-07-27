@@ -37,7 +37,7 @@ export async function setupClient(onReady: (client: Client) => void) {
 
     console.log('Logging in...')
 
-    client.on('debug', console.log)
+    // client.on('debug', console.log)
 
     client.on('ready', () => {
       console.log('Logged in')

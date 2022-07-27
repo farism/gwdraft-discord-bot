@@ -1,13 +1,12 @@
 import { CommandInteraction } from 'discord.js'
 import { handleBanFlux, handleBanSchedule, handleBanSkill } from './bans/handlers'
 import {
-  handleDraftAddPlayer,
+  handleDraftAddPlayers,
   handleDraftCancel,
   handleDraftCreate,
   handleDraftEdit,
-  handleDraftRemovePlayer,
+  handleDraftRemovePlayers,
   handleDraftReorderPlayer,
-  handleDraftStart,
   handleDraftWinner,
 } from './draft/handlers'
 import { handlePlayerIgn, handlePlayerStats } from './player/handlers'
@@ -46,10 +45,9 @@ export function getInteractionHandler(i: CommandInteraction) {
     rank_view: handleRankView,
 
     draft_create: handleDraftCreate,
-    draft_start: handleDraftStart,
-    draft_add_player: handleDraftAddPlayer,
-    draft_remove_player: handleDraftRemovePlayer,
-    draft_reorder_player: handleDraftReorderPlayer,
+    draft_add_players: handleDraftAddPlayers,
+    draft_remove_players: handleDraftRemovePlayers,
+    draft_reorder_players: handleDraftReorderPlayer,
     draft_winner: handleDraftWinner,
     draft_edit: handleDraftEdit,
     draft_cancel: handleDraftCancel,

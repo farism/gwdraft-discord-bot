@@ -1,4 +1,11 @@
-import { addDays, differenceInMilliseconds, subHours } from 'date-fns'
+import {
+  addDays,
+  differenceInMilliseconds,
+  hoursToMilliseconds,
+  minutesToMilliseconds,
+  secondsToMilliseconds,
+  subHours,
+} from 'date-fns'
 import { zonedTimeToUtc } from 'date-fns-tz'
 import {
   CommandInteraction,
@@ -6,8 +13,9 @@ import {
   MessageActionRow,
   MessageButton,
   MessageEmbed,
-  User,
+  User as DiscordUser,
 } from 'discord.js'
+import { firestore } from 'firebase-admin'
 import debounce from 'lodash.debounce'
 import { client } from '../../client'
 import { drafts, getGuildSettings, players, Settings } from '../../firebase'
@@ -16,9 +24,19 @@ import { parseTime } from '../../helpers/time'
 import { userHasRole } from '../permissions'
 import { getMessage } from './registry'
 
-export interface PartialUser {
+interface User extends DiscordUser {
+  nickname?: string
+}
+
+export interface DocUser {
   id: string
-  name: string
+  username: string
+  nickname?: string
+}
+
+export interface LogUser extends DocUser {
+  durationInDraft: number
+  durationInCount: number
 }
 
 export interface DraftOptions {
@@ -29,20 +47,20 @@ export interface DraftOptions {
   location: string
   count: number
   description: string
-  readyWaitTime: number
   skipSignupPing: boolean
   interaction?: CommandInteraction
 }
 
 export interface DraftDoc extends DraftOptions {
-  canceled: boolean
+  createdAt: FirebaseFirestore.Timestamp
+  canceledAt: FirebaseFirestore.Timestamp
   date: FirebaseFirestore.Timestamp
   hasSentSignupPing: boolean
   embedMessageId: string
-  readyUsers: string[]
   signupMessageId: string | null
-  teams: { [k: number]: string[] | PartialUser[] }
-  users: string[] | PartialUser[]
+  teams: { [k: number]: string[] | DocUser[] }
+  users: DocUser[]
+  usersLog: LogUser[]
 }
 
 export function serializeDraft(draft: Draft) {
@@ -54,29 +72,32 @@ export function serializeDraft(draft: Draft) {
     guildId: draft.guildId,
     hostId: draft.hostId,
     location: draft.location,
-    readyWaitTime: draft.readyWaitTime,
     skipSignupPing: draft.skipSignupPing,
     time: draft.time,
 
     //state
-    canceled: draft.canceled,
+    canceledAt: draft.canceledAt,
     date: draft.date,
     embedMessageId: draft.embedMessageId,
     guildName: draft.guild?.name,
     hasSentSignupPing: draft.hasSentSignupPing,
-    readyUsers: draft.readyUsers,
     signupMessageId: draft.signupMessageId,
     teams: Object.entries(draft.teams).reduce((acc, [key, users]) => {
       return {
         ...acc,
-        [key]: users.map((u) => ({ id: u.id, name: draft.nicknames[u.id] || u.username })),
+        [key]: users.map((u) => ({ id: u.id, username: u.username, nickname: u.nickname })),
       }
-    }, {} as { [k: string]: PartialUser[] }),
-    users: draft.users.map((u) => ({ id: u.id, name: draft.nicknames[u.id] || u.username })),
+    }, {} as { [k: string]: DocUser[] }),
+    users: draft.users.map((u) => ({ id: u.id, name: u.username, nickname: u.nickname })),
+    usersLog: draft.usersLog,
   }
 }
 
-export async function deserializeDraft(guild: Guild, data: DraftDoc): Promise<Draft> {
+export async function deserializeDraft(
+  guild: Guild,
+  docId: string,
+  data: DraftDoc,
+): Promise<Draft> {
   const userIds = data.users?.map((u: any) => (typeof u === 'string' ? u : u.id))
 
   const membersCollection = await guild.members.fetch({ user: userIds })
@@ -88,33 +109,28 @@ export async function deserializeDraft(guild: Guild, data: DraftDoc): Promise<Dr
     guildId: data.guildId,
     hostId: data.hostId,
     location: data.location,
-    readyWaitTime: data.readyWaitTime,
     skipSignupPing: data.skipSignupPing,
     time: data.time,
   })
 
+  draft.id = docId
   draft.date = data.date.toDate()
   draft.hasSentSignupPing = data.hasSentSignupPing
   draft.embedMessageId = data.embedMessageId
-  draft.readyUsers = data.readyUsers
   draft.signupMessageId = data.signupMessageId
 
-  draft.addUsers(
-    data.users.map((user) => {
-      const id = typeof user === 'string' ? user : user.id
+  const users = data.users.map((user) => membersCollection.get(user.id)?.user).filter((u) => u)
 
-      return membersCollection.get(id)?.user
-    }),
-  )
+  draft.usersLog = data.usersLog
+
+  draft.addUsers(...(users as User[]))
 
   for (let [key, users] of Object.entries(data.teams)) {
     const team = draft.teams[parseInt(key, 10)]
 
     users.forEach((user) => {
       const id = typeof user === 'string' ? user : user.id
-
       const member = membersCollection.get(id)
-
       if (member) {
         team.push(member.user)
       }
@@ -132,24 +148,24 @@ export class Draft {
   guildId: string
   hostId: string
   location: string
-  readyWaitTime: number
   skipSignupPing: boolean
   time: string | null
 
   // state
-  canceled: boolean = false
+  id?: string
+  canceledAt: Date | null = null
   date: Date = new Date()
   hasSentSignupPing: boolean = false
   embedMessageId: string | null = null
-  readyUsers: string[] = []
   settings: Settings | null = null
   signupMessageId: string | null = null
-  teams: { [k: number]: User[] } = { 1: [], 2: [] }
+  teams: { [k: number]: User[] } = {}
   users: User[] = []
-  nicknames: { [k: string]: string } = {}
+  usersLog: LogUser[] = []
 
-  registrationTimer: NodeJS.Timeout | null = null
-  updateTimer: NodeJS.Timeout | null = null
+  signupTimer?: NodeJS.Timeout
+  updateUserLogTimer?: NodeJS.Timeout
+  saveTimer?: NodeJS.Timeout
   interaction?: CommandInteraction
   updateEmbedMessageDebounced: () => void = () => {}
   sendPingDebounced: (string: string) => void = () => {}
@@ -162,7 +178,6 @@ export class Draft {
     location,
     count = defaultPlayerCount,
     description = '',
-    readyWaitTime = 5,
     skipSignupPing = false,
     interaction,
   }: DraftOptions) {
@@ -179,18 +194,16 @@ export class Draft {
     this.guildId = guildId
     this.hostId = hostId
     this.location = location
-    this.readyWaitTime = readyWaitTime
     this.skipSignupPing = skipSignupPing
     this.time = time
     this.interaction = interaction
 
-    this.updateEmbedMessageDebounced = debounce(this.updateEmbedMessage, 5000, {
+    this.updateEmbedMessageDebounced = debounce(this.updateEmbedMessage, secondsToMilliseconds(5), {
       leading: true,
       trailing: true,
     })
 
-    this.sendPingDebounced = debounce(this.sendSignupPing, 30000, {
-      maxWait: 15 * 60 * 1000, // only allow signup ping every 15 min
+    this.sendPingDebounced = debounce(this.sendSignupPing, minutesToMilliseconds(15), {
       leading: false,
       trailing: false,
     })
@@ -198,6 +211,7 @@ export class Draft {
 
   public async initializeNewDraft() {
     await this.loadSettings()
+    await this.initializeTimers()
     await this.scheduleSignupPing()
     await this.sendEmbedMessage()
     await this.save()
@@ -205,7 +219,14 @@ export class Draft {
 
   public async initializeExistingDraft() {
     await this.loadSettings()
+    await this.initializeTimers()
     await this.collectInteractions()
+  }
+
+  private initializeTimers() {
+    this.updateUserLogTimer = setInterval(() => this.updateUserLog(), secondsToMilliseconds(1))
+
+    this.saveTimer = setInterval(() => this.save(false), minutesToMilliseconds(5))
   }
 
   public get guild(): Guild | undefined {
@@ -232,18 +253,6 @@ export class Draft {
     return new Date() > this.date
   }
 
-  private get isAboveCount() {
-    return this.usersInCount.length >= this.count
-  }
-
-  private get needsOneMorePlayer() {
-    return this.users.length === this.count - 1
-  }
-
-  private get canIndicateReady() {
-    return this.isPastStartTime && this.isAboveCount
-  }
-
   private get usersInCount() {
     return this.users.slice(0, this.count)
   }
@@ -253,18 +262,14 @@ export class Draft {
 
     const timeout = diff < 0 ? Math.abs(diff) : 0
 
-    this.registrationTimer = setTimeout(
+    this.signupTimer = setTimeout(
       () => this.sendSignupPing('Sign-ups are open, register now!'),
       timeout,
     )
   }
 
-  private formatReady(user: User) {
-    return this.readyUsers.find((id) => id === user.id) ? '✓ ' : ''
-  }
-
-  private isUserInDraft(user: User) {
-    return this.users.findIndex((u) => u.id === user.id) >= 0
+  private timestamp(date: Date) {
+    return Math.floor(date.getTime() / 1000)
   }
 
   private isUserOnTeam(user: User, team: number) {
@@ -289,7 +294,7 @@ export class Draft {
     let member = this.guild?.members.cache.get(user.id)
 
     if (!member) {
-      member = await this.guild?.members.fetch(user)
+      member = await this.guild?.members.fetch(user.id)
     }
 
     return member?.nickname || user.username
@@ -297,15 +302,6 @@ export class Draft {
 
   private createComponents() {
     const row = new MessageActionRow()
-
-    // row.addComponents(
-    //   new MessageButton()
-    //     .setCustomId('ready')
-    //     .setLabel('Ready')
-    //     .setStyle('SUCCESS')
-    //     .setEmoji('✅')
-    //     .setDisabled(!this.canIndicateReady),
-    // )
 
     row.addComponents(
       new MessageButton()
@@ -324,8 +320,6 @@ export class Draft {
   }
 
   private async createEmbed() {
-    const time = Math.floor(this.date.getTime() / 1000)
-
     const divider = (i: number) => (i === this.count ? '-----\n' : '')
 
     const signups: string[] = []
@@ -335,9 +329,7 @@ export class Draft {
 
       const ign = doc?.ign ? ` (${doc.ign})` : ''
 
-      const nickname = this.nicknames[user.id] ?? user.username
-
-      const str = `${divider(i)}${i + 1}. ${this.formatReady(user)}${nickname}${ign}`
+      const str = `${divider(i)}${i + 1}. ${user.nickname}${ign}`
 
       signups.push(str.replace(/_/g, '\\_'))
     }
@@ -346,8 +338,14 @@ export class Draft {
 
     embed.addField(
       'Start Time',
-      this.isPastStartTime ? `~~<t:${time}>~~ In Progress` : `<t:${time}>`,
+      this.isPastStartTime
+        ? `~~<t:${this.timestamp(this.date)}>~~ In Progress`
+        : `<t:${this.timestamp(this.date)}>`,
     )
+
+    if (!this.isPastSignupTime) {
+      embed.addField('Sign-ups begin at', `<t:${this.timestamp(this.signupDate)}>`)
+    }
 
     embed.addField('Meeting Location', this.location)
 
@@ -365,9 +363,8 @@ export class Draft {
       .sort()
       .forEach((key) => {
         const t =
-          this.teams[parseInt(key, 10)]
-            ?.map((u, i) => `${i + 1}. ${this.nicknames[u.id] || u.username}`)
-            .join('\n') || 'None'
+          this.teams[parseInt(key, 10)]?.map((u, i) => `${i + 1}. ${u.nickname}`).join('\n') ||
+          'None'
 
         if (t) {
           embed.addField(`Team ${key}`, t, true)
@@ -375,24 +372,6 @@ export class Draft {
       })
 
     return embed
-  }
-
-  private async moveUserToBackOfQueue(user: User) {
-    this.users = this.users.filter((u) => u.id !== user.id)
-
-    this.users.push(user)
-
-    this.save()
-  }
-
-  private async toggleReady(user: User) {
-    if (this.readyUsers.includes(user.id)) {
-      this.readyUsers = this.readyUsers.filter((id) => id !== user.id)
-    } else {
-      this.readyUsers = [...this.readyUsers, user.id]
-    }
-
-    this.save()
   }
 
   private async sendSignupPing(content: string) {
@@ -422,13 +401,27 @@ export class Draft {
     }
   }
 
-  public async collectInteractions() {
+  private updateUserLog() {
+    this.users.forEach((u) => {
+      const log = this.usersLog.find((ul) => ul.id === u.id)
+
+      if (log) {
+        log.durationInDraft += secondsToMilliseconds(1)
+
+        if (this.isUserInCount(u)) {
+          log.durationInCount += secondsToMilliseconds(1)
+        }
+      }
+    })
+  }
+
+  private async collectInteractions() {
     const message = await this.getMessage(this.embedMessageId)
 
     if (message) {
       const collector = message.createMessageComponentCollector({
         dispose: true,
-        time: 7 * 24 * 60 * 60 * 1000,
+        time: hoursToMilliseconds(72),
       })
 
       collector.on('collect', async (i) => {
@@ -436,37 +429,24 @@ export class Draft {
           if (this.isUserInDraft(i.user)) {
             await i.reply({ content: `You have already joined the draft`, ephemeral: true })
           } else {
-            await this.addUser(i.user)
+            await this.addUsers(i.user)
 
             await i.reply({ content: `You have joined the draft!`, ephemeral: true })
           }
         } else if (i.customId === 'leave') {
           if (this.isUserInDraft(i.user)) {
-            await this.removeUser(i.user)
+            await this.removeUsers(i.user)
 
             i.reply({ content: `You have left the draft`, ephemeral: true })
           } else {
             await i.reply({ content: `You are not in the draft`, ephemeral: true })
           }
-        } else if (i.customId === 'ready') {
-          await this.toggleReady(i.user)
-
-          await i.reply({ content: 'You have toggled ready state', ephemeral: true })
         }
-
-        // setTimeout(async () => {
-        //   try {
-        //     i.deleteReply()
-        //   } catch (e) {
-        //     console.log('Could not delete interaction reply')
-        //     console.log(e)
-        //   }
-        // }, 1000)
       })
     }
   }
 
-  public async sendEmbedMessage() {
+  private async sendEmbedMessage() {
     if (!this.channel?.isText()) {
       throw new Error('Draft must be created in a text channel')
     }
@@ -486,22 +466,25 @@ export class Draft {
     }
   }
 
-  public async updateEmbedMessage() {
+  private async updateEmbedMessage() {
     try {
       const message = await this.getMessage(this.embedMessageId)
 
       if (message?.editable) {
         const embed = await this.createEmbed()
 
-        await message?.edit({
-          embeds: [embed],
-          components: [this.createComponents()],
-        })
-
-        await message?.edit({
-          embeds: [embed],
-          components: [this.createComponents()],
-        })
+        if (this.canceledAt) {
+          await message?.edit({
+            content: 'The draft has been canceled',
+            embeds: [],
+            components: [],
+          })
+        } else {
+          await message?.edit({
+            embeds: [embed],
+            components: [this.createComponents()],
+          })
+        }
       }
     } catch (e) {
       console.log('Failed to update message')
@@ -509,18 +492,17 @@ export class Draft {
     }
   }
 
+  public isUserInDraft(user: User) {
+    return this.users.findIndex((u) => u.id === user.id) >= 0
+  }
+
   public isUserInCount(user: User) {
     return !!this.usersInCount.find((u) => u.id === user.id)
   }
 
-  public isUserOnATeam(user: User) {
-    return Object.values(this.teams).some((t) => t.some((u) => u.id === user.id))
-  }
-
   public isUserAModerator(user: User) {
     if (this.guild) {
-      console.log(this.settings?.draft_moderator_role)
-      return userHasRole(this.guild, user, this.settings?.draft_moderator_role || '')
+      return userHasRole(this.guild, user.id, this.settings?.draft_moderator_role || '')
     }
 
     return false
@@ -532,69 +514,40 @@ export class Draft {
     )
   }
 
-  public async addUser(user: User) {
-    const wasBelowCount = !this.isAboveCount
-
-    if (!this.isUserInDraft(user)) {
-      this.users = [...this.users, user]
-
-      this.nicknames[user.id] = await this.getNickname(user)
-
-      this.save()
-
-      if (wasBelowCount && this.isAboveCount) {
-        // let diff = differenceInMilliseconds(new Date(), this.date)
-
-        // let diffInMinutes = this.readyWaitTime
-
-        // if (diff < 0) {
-        //   const end = addMilliseconds(addMinutes(new Date(), this.readyWaitTime), Math.abs(diff))
-
-        //   diffInMinutes = Math.ceil(differenceInSeconds(new Date(), end) / 60)
-        // }
-
-        // const content = `The draft has enough players to begin, please hit "Ready" within the next ${diffInMinutes} minutes or be moved to the back of the queue.`
-        const content = `The draft has enough players to begin.`
-
-        // setTimeout(() => {
-        //   this.usersInCount.forEach((u) => {
-        //     if (!this.readyUsers.includes(u.id)) {
-        //       this.moveUserToBackOfQueue(u)
-        //     }
-        //   })
-        // }, diffInMinutes * 60 * 1000)
-
-        this.sendPingDebounced(content)
-      } else if (this.needsOneMorePlayer) {
-        const content = `Draft is close to filling (${this.count - 1}/${this.count}) Join now!`
-
-        this.sendPingDebounced(content)
-      }
-    }
+  public isUserOnATeam(user: User) {
+    return Object.values(this.teams).some((t) => t.some((u) => u.id === user.id))
   }
 
-  public async removeUser(user: User) {
-    const wasAboveCount = this.isAboveCount
+  public async addUsers(...users: User[]) {
+    for (let user of users) {
+      if (user && !this.isUserInDraft(user)) {
+        user.nickname = await this.getNickname(user)
 
-    this.users = this.users.filter((u) => u.id !== user.id)
+        this.users = [...this.users, user]
+      }
 
-    this.readyUsers = this.readyUsers.filter((id) => id != user.id)
+      if (!this.usersLog.find((u) => u.id === user.id)) {
+        this.usersLog.push({
+          id: user.id,
+          username: user.username,
+          nickname: user.nickname,
+          durationInDraft: 0,
+          durationInCount: 0,
+        })
+      }
+    }
 
-    Object.keys(this.teams).forEach((key) => {
-      const team = parseInt(key, 10)
+    this.save()
+  }
 
-      this.teams[team] = this.teams[team]?.filter((u) => u.id !== user.id) ?? []
-    })
+  public async removeUsers(...users: User[]) {
+    for (let user of users) {
+      this.users = this.users.filter((u) => u.id !== user.id)
 
-    if (this.needsOneMorePlayer) {
-      const content = `Draft is close to filling (${this.count - 1}/${this.count}) Join now!`
-
-      this.sendPingDebounced(content)
-    } else if (wasAboveCount) {
-      // const nextUser = this.usersInCount[this.usersInCount.length - 1]
-      // nextUser?.send(
-      //   `You are now in the draft count, please be ready within ${this.readyWaitTime} minutes`,
-      // )
+      Object.keys(this.teams).forEach((key) => {
+        const team = parseInt(key, 10)
+        this.teams[team] = this.teams[team]?.filter((u) => u.id !== user.id) ?? []
+      })
     }
 
     this.save()
@@ -609,9 +562,7 @@ export class Draft {
   }
 
   public async setTeamCaptain(user: User, team: number) {
-    if (this.isUserInCount(user)) {
-      this.teams[team]?.unshift(user)
-    }
+    this.teams[team]?.unshift(user)
 
     this.save()
   }
@@ -662,70 +613,69 @@ export class Draft {
     this.save()
   }
 
-  // for hydrating a persisted draft
-  public async addUsers(users: (User | undefined)[]) {
-    for (const user of users) {
-      if (user && !this.isUserInDraft(user)) {
-        this.users = [...this.users, user]
+  public async cancel() {
+    clearTimeout(this.signupTimer || undefined)
 
-        this.nicknames[user.id] = await this.getNickname(user)
-      }
-    }
-  }
-
-  public async cancel(canceler: User) {
-    if (this.registrationTimer) {
-      clearTimeout(this.registrationTimer)
-    }
+    clearTimeout(this.updateUserLogTimer || undefined)
 
     const message = await this.getMessage(this.embedMessageId)
 
     const signupMessage = await this.getMessage(this.signupMessageId)
 
-    if (message?.editable) {
-      message.edit({
-        content: `Draft has been canceled by <@${canceler.id}>`,
-        embeds: [],
-        components: [],
-      })
+    this.canceledAt = new Date()
+
+    this.save(false)
+
+    if (message?.deletable) {
+      await message.delete()
     }
 
     if (signupMessage?.deletable) {
       await signupMessage.delete()
     }
-
-    this.canceled = true
-
-    this.save()
-
-    setTimeout(() => {
-      if (message?.deletable) {
-        message.delete()
-      }
-    }, 10000)
   }
 
-  public async save() {
-    const doc = serializeDraft(this)
+  public async save(updateEmbed: boolean = true) {
+    const data = serializeDraft(this)
 
     try {
-      await drafts.doc(this.guildId).set(doc, { merge: true })
+      if (this.id) {
+        await drafts.doc(this.id)?.set(data, { merge: true })
+      } else {
+        const doc = drafts.doc()
 
-      this.updateEmbedMessageDebounced()
+        await doc.set({ ...data, createdAt: firestore.Timestamp.now() })
+
+        this.id = doc.id
+      }
+
+      if (updateEmbed) {
+        this.updateEmbedMessageDebounced()
+      }
     } catch (e) {
       console.log('Draft failed to save')
       console.log(e)
     }
   }
 
-  public async start() {
-    this.readyUsers = []
+  public async edit(host: DiscordUser | null, location: string | null, description: string | null) {
+    if (host) {
+      this.hostId = host.id
+    }
+
+    if (location) {
+      this.location = location
+    }
+
+    if (description) {
+      this.description = description
+    }
 
     this.save()
   }
 
   public async reset() {
-    this.teams = [[], []]
+    this.teams = {}
 
     this.save()
   }

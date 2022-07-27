@@ -4,6 +4,8 @@ import { decodeTemplate, getAttributeName, getProfessionName, skillbarToImage } 
 export async function handleSkillTemplate(i: CommandInteraction) {
   const code = i.options.getString('code', true)
 
+  const hideSkillInfo = i.options.getBoolean('hide_skill_info') || false
+
   const skillbar = decodeTemplate(code)
 
   if (skillbar) {
@@ -12,7 +14,7 @@ export async function handleSkillTemplate(i: CommandInteraction) {
     const attachment = new MessageAttachment(canvas.toBuffer(), `image.png`)
 
     const attributes = Object.entries(skillbar.attributes).map(
-      ([value, key]) => `${getAttributeName(key)}: **${value}**`,
+      ([key, value]) => `${getAttributeName(key as any)}: **${value}**`,
     )
 
     const primary = getProfessionName(skillbar.primary)
@@ -23,33 +25,38 @@ export async function handleSkillTemplate(i: CommandInteraction) {
       .setTitle(`${primary} / ${secondary} - ${code}`)
       .setDescription(attributes.join(', '))
 
-    skillbar.skills.forEach((skill: any, i) => {
-      const details: string[] = []
+    if (!hideSkillInfo) {
+      skillbar.skills.forEach((skill: any, i) => {
+        const details: string[] = []
 
-      if (skill?.energy) {
-        details.push(`<:skillenergy:997661522727804929> ${skill?.energy}`)
-      }
+        if (skill?.adrenaline) {
+          details.push(`<:skilladrenaline:997661520915877958> ${skill?.adrenaline}`)
+        }
+        if (skill?.energy) {
+          details.push(`<:skillenergy:997661522727804929> ${skill?.energy}`)
+        }
 
-      if (skill?.activation) {
-        details.push(`<:skillactivationtime:997661517866598440> ${skill?.activation}`)
-      }
+        if (skill?.activation) {
+          details.push(`<:skillactivationtime:997661517866598440> ${skill?.activation}`)
+        }
 
-      if (skill?.recharge) {
-        details.push(`<:skillrechargetime:997661525928063046> ${skill?.recharge}`)
-      }
+        if (skill?.recharge) {
+          details.push(`<:skillrechargetime:997661525928063046> ${skill?.recharge}`)
+        }
 
-      if (i > 0 && (i - 1) % 2 === 0) {
-        embed.addField('\u200b', '\u200b', true)
-      }
+        if (i > 0 && (i - 1) % 2 === 0) {
+          embed.addField('\u200b', '\u200b', true)
+        }
 
-      const concise = skill?.['concise description']
+        const concise = skill?.['concise description']
 
-      const page = encodeURIComponent(skill?.name)
+        const page = encodeURIComponent(skill?.name)
 
-      const link = `[(info)](https://wiki.guildwars.com/wiki/${page} "${concise}")`
+        const link = `[(info)](https://wiki.guildwars.com/wiki/${page} "${concise}")`
 
-      embed.addField(`${i + 1}. ${skill?.name}`, `${details.join('  ')} - ${link}`, true)
-    })
+        embed.addField(`${i + 1}. ${skill?.name}`, `${details.join('  ')} - ${link}`, true)
+      })
+    }
 
     await i.reply({ files: [attachment], embeds: [embed] })
   }

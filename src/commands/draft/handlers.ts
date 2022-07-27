@@ -1,9 +1,19 @@
-import { addMilliseconds, isBefore } from 'date-fns'
-import { CommandInteraction } from 'discord.js'
+import {
+  addMilliseconds,
+  differenceInMilliseconds,
+  formatDuration,
+  intervalToDuration,
+  isBefore,
+  millisecondsToMinutes,
+  minutesToMilliseconds,
+  minutesToSeconds,
+} from 'date-fns'
+import { CommandInteraction, User } from 'discord.js'
 import { addLossToPlayer, addWinToPlayer, getGuildSettings } from '../../firebase'
 import { userHasRole } from '../permissions'
 import { Draft } from './draft'
 import { addDraft, getDraft, removeDraft } from './registry'
+import table from 'text-table'
 
 const winnerWaitTime = 3 * 60 * 1000
 
@@ -22,7 +32,7 @@ export async function handleDraftCreate(i: CommandInteraction) {
   const guildSettings = await getGuildSettings(i.guildId)
 
   const hasRole = guildSettings?.draft_moderator_role
-    ? userHasRole(i.guild, i.user, guildSettings?.draft_moderator_role || '')
+    ? userHasRole(i.guild, i.user.id, guildSettings?.draft_moderator_role || '')
     : true
 
   const isInDraftChannel = guildSettings?.draft_channel
@@ -44,12 +54,11 @@ export async function handleDraftCreate(i: CommandInteraction) {
     const location = i.options.getString('location') || 'Great Temple of Balthazar - AE1'
     const count = i.options.getInteger('count') || 16
     const description = i.options.getString('description') || ''
-    const readyWaitTime = i.options.getInteger('ready_wait_time') || 5
     const skipSignupPing = i.options.getBoolean('skip_signup_ping') || false
 
     if (i.guildId) {
       try {
-        i.deferReply({ ephemeral: true })
+        await i.deferReply({ ephemeral: true })
 
         const draft = new Draft({
           channelId: i.channelId,
@@ -58,7 +67,6 @@ export async function handleDraftCreate(i: CommandInteraction) {
           guildId: i.guildId,
           hostId: i.user.id,
           location,
-          readyWaitTime,
           skipSignupPing,
           time,
           interaction: i, // TODO can we remove this ref?
@@ -76,31 +84,32 @@ export async function handleDraftCreate(i: CommandInteraction) {
   }
 }
 
-export async function handleDraftStart(i: CommandInteraction) {
-  if (!getDraft(i)) {
-    i.reply({ content: 'There is no active draft', ephemeral: true })
-    return
-  }
+export async function handleDraftAddPlayers(i: CommandInteraction) {
+  const users = [
+    i.options.getUser('user1'),
+    i.options.getUser('user2'),
+    i.options.getUser('user3'),
+    i.options.getUser('user4'),
+    i.options.getUser('user5'),
+  ].filter((u) => u)
 
-  getDraft(i)?.start()
+  getDraft(i)?.addUsers(...(users as User[]))
 
-  await i.reply({ content: 'Draft started', ephemeral: true })
+  await i.reply({ content: `Player${users.length === 1 ? '' : 's'} added`, ephemeral: true })
 }
 
-export async function handleDraftAddPlayer(i: CommandInteraction) {
-  const user = i.options.getUser('user', true)
+export async function handleDraftRemovePlayers(i: CommandInteraction) {
+  const users = [
+    i.options.getUser('user1'),
+    i.options.getUser('user2'),
+    i.options.getUser('user3'),
+    i.options.getUser('user4'),
+    i.options.getUser('user5'),
+  ].filter((u) => u)
 
-  getDraft(i)?.addUser(user)
+  getDraft(i)?.removeUsers(...(users as User[]))
 
-  await i.reply({ content: `Player added`, ephemeral: true })
-}
-
-export async function handleDraftRemovePlayer(i: CommandInteraction) {
-  const user = i.options.getUser('user', true)
-
-  getDraft(i)?.removeUser(user)
-
-  await i.reply({ content: 'Player removed', ephemeral: true })
+  await i.reply({ content: `Player${users.length === 1 ? '' : 's'} removed`, ephemeral: true })
 }
 
 export async function handleDraftReorderPlayer(i: CommandInteraction) {
@@ -151,27 +160,11 @@ export async function handleDraftWinner(i: CommandInteraction) {
 export async function handleDraftEdit(i: CommandInteraction) {
   const draft = getDraft(i)
 
-  if (draft) {
-    const host = i.options.getUser('host')
-
-    if (host) {
-      draft.hostId = host.id
-    }
-
-    const location = i.options.getString('location')
-
-    if (location) {
-      draft.location = location
-    }
-
-    const description = i.options.getString('description')
-
-    if (description) {
-      draft.description = description
-    }
-
-    draft.updateEmbedMessageDebounced()
-  }
+  await draft?.edit(
+    i.options.getUser('host'),
+    i.options.getString('location'),
+    i.options.getString('description'),
+  )
 
   await i.reply({ content: `Draft edited`, ephemeral: true })
 }
@@ -181,14 +174,50 @@ export async function handleDraftCancel(i: CommandInteraction) {
 
   if (draft) {
     try {
-      await draft.cancel(i.user)
+      await draft.cancel()
     } catch (e) {
       console.log(e)
     }
 
     await removeDraft(draft)
 
-    await i.reply({ content: `Draft canceled`, ephemeral: true })
+    const draftDuration = intervalToDuration({
+      start: 0,
+      end: differenceInMilliseconds(new Date(), draft.date),
+    })
+
+    function format(d: Duration): string {
+      return `${d.hours}:${(d.minutes || 0) < 10 ? '0' : ''}${d.minutes}`
+    }
+
+    const content = [`Draft has been canceled after ${formatDuration(draftDuration)}`]
+
+    if (draft.usersLog.length > 0) {
+      const log = draft.usersLog.map((u, i) => {
+        return [
+          `${i + 1}.`,
+          u.nickname || u.username,
+          format(intervalToDuration({ start: 0, end: u.durationInDraft })),
+          format(intervalToDuration({ start: 0, end: u.durationInCount })),
+          `${((u.durationInCount / u.durationInDraft) * 100).toFixed(0)}%`,
+        ]
+      })
+
+      const t = table([
+        ['', 'Name', 'In Draft', 'In Count', '% In Count'],
+        ['', '', '', '', ''],
+        ...log,
+      ])
+
+      content.push('The following players joined the draft:')
+
+      content.push('```' + t + '```')
+    }
+
+    await i.reply({ content: content.join('\n\n') })
+
+    const ic = i
+    setTimeout(() => ic.deleteReply().catch((e) => console.log(e)), minutesToMilliseconds(60))
   } else {
     await i.reply({ content: `There is no active draft to cancel`, ephemeral: true })
   }

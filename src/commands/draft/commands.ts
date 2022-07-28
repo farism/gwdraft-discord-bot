@@ -46,7 +46,8 @@ export const draftCmd = new SlashCommandBuilder()
         // prettier-ignore
         option
           .setName('user1')
-          .setDescription('A player to add'),
+          .setDescription('A player to add')
+          .setRequired(true),
       )
       .addUserOption((option) =>
         // prettier-ignore
@@ -81,7 +82,8 @@ export const draftCmd = new SlashCommandBuilder()
         // prettier-ignore
         option
           .setName('user1')
-          .setDescription('A player to remove'),
+          .setDescription('A player to remove')
+          .setRequired(true),
       )
       .addUserOption((option) =>
         // prettier-ignore

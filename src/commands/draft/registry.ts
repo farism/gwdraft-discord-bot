@@ -3,19 +3,7 @@ import { drafts } from '../../firebase'
 import { GuildId } from '../../types'
 import { deserializeDraft, Draft, DraftDoc } from './draft'
 
-const draftIds: { [k: GuildId]: number } = {}
-
 const draftRegistry: { [k: GuildId]: Draft } = {}
-
-export function nextDraftId(guildId: string) {
-  if (draftIds[guildId] !== undefined) {
-    draftIds[guildId] = draftIds[guildId] + 1
-  } else {
-    draftIds[guildId] = 0
-  }
-
-  return draftIds[guildId]
-}
 
 export function addDraft(draft: Draft) {
   draftRegistry[draft.guildId] = draft

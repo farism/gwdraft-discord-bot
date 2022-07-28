@@ -47,7 +47,7 @@ export function getInteractionHandler(i: CommandInteraction) {
     draft_create: handleDraftCreate,
     draft_add_players: handleDraftAddPlayers,
     draft_remove_players: handleDraftRemovePlayers,
-    draft_reorder_players: handleDraftReorderPlayer,
+    draft_reorder_player: handleDraftReorderPlayer,
     draft_winner: handleDraftWinner,
     draft_edit: handleDraftEdit,
     draft_cancel: handleDraftCancel,

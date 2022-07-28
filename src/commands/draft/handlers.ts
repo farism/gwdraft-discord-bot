@@ -4,16 +4,14 @@ import {
   formatDuration,
   intervalToDuration,
   isBefore,
-  millisecondsToMinutes,
   minutesToMilliseconds,
-  minutesToSeconds,
 } from 'date-fns'
 import { CommandInteraction, User } from 'discord.js'
+import table from 'text-table'
 import { addLossToPlayer, addWinToPlayer, getGuildSettings } from '../../firebase'
 import { userHasRole } from '../permissions'
 import { Draft } from './draft'
 import { addDraft, getDraft, removeDraft } from './registry'
-import table from 'text-table'
 
 const winnerWaitTime = 3 * 60 * 1000
 

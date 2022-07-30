@@ -19,17 +19,23 @@ export const draftCmd = new SlashCommandBuilder()
           .setName('location')
           .setDescription('The location where players should players meet in game (default = GToB AE1)'),
       )
-      .addIntegerOption((option) =>
-        // prettier-ignore
-        option
-          .setName('count')
-          .setDescription('How many players are required to join the draft before starting (default = 16)'),
-      )
       .addStringOption((option) =>
         // prettier-ignore
         option
           .setName('description')
           .setDescription('Adds a description to the draft'),
+      )
+      .addBooleanOption((option) =>
+        // prettier-ignore
+        option
+          .setName('open_pool')
+          .setDescription('Create an orderless open pool draft'),
+      )
+      .addIntegerOption((option) =>
+        // prettier-ignore
+        option
+          .setName('count')
+          .setDescription('How many players are required to join the draft before starting (default = 16)'),
       )
       .addBooleanOption((option) =>
         // prettier-ignore
@@ -150,6 +156,12 @@ export const draftCmd = new SlashCommandBuilder()
         option
           .setName('description')
           .setDescription('Adds a description to the draft'),
+      )
+      .addBooleanOption((option) =>
+        // prettier-ignore
+        option
+          .setName('open_pool')
+          .setDescription('Set draft type to be open pool'),
       ),
   )
   .addSubcommand((subcommand) =>

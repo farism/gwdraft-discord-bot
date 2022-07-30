@@ -1,7 +1,9 @@
 import {
   addDays,
   differenceInMilliseconds,
+  formatDuration,
   hoursToMilliseconds,
+  intervalToDuration,
   minutesToMilliseconds,
   secondsToMilliseconds,
   subHours,
@@ -17,8 +19,16 @@ import {
 } from 'discord.js'
 import { firestore } from 'firebase-admin'
 import debounce from 'lodash.debounce'
+import table from 'text-table'
 import { client } from '../../client'
-import { drafts, getGuildSettings, players, Settings } from '../../firebase'
+import {
+  addLossToPlayer,
+  addWinToPlayer,
+  drafts,
+  getGuildSettings,
+  players,
+  Settings,
+} from '../../firebase'
 import { defaultPlayerCount } from '../../helpers/constants'
 import { parseTime } from '../../helpers/time'
 import { userHasRole } from '../permissions'
@@ -48,6 +58,7 @@ export interface DraftOptions {
   count: number
   description: string
   skipSignupPing: boolean
+  openPool: boolean
   interaction?: CommandInteraction
 }
 
@@ -55,10 +66,15 @@ export interface DraftDoc extends DraftOptions {
   createdAt: FirebaseFirestore.Timestamp
   canceledAt: FirebaseFirestore.Timestamp
   date: FirebaseFirestore.Timestamp
-  hasSentSignupPing: boolean
-  embedMessageId: string
-  signupMessageId: string | null
-  teams: { [k: number]: string[] | DocUser[] }
+  messages: {
+    embed: string
+    opened: string | null
+    full: string | null
+    canceled: string | null
+  }
+  teams: {
+    [k: number]: string[] | DocUser[]
+  }
   users: DocUser[]
   usersLog: LogUser[]
 }
@@ -72,16 +88,20 @@ export function serializeDraft(draft: Draft) {
     guildId: draft.guildId,
     hostId: draft.hostId,
     location: draft.location,
+    openPool: draft.openPool,
     skipSignupPing: draft.skipSignupPing,
     time: draft.time,
 
     //state
     canceledAt: draft.canceledAt,
     date: draft.date,
-    embedMessageId: draft.embedMessageId,
     guildName: draft.guild?.name,
-    hasSentSignupPing: draft.hasSentSignupPing,
-    signupMessageId: draft.signupMessageId,
+    messages: {
+      embed: draft.messages.embed || null,
+      opened: draft.messages.opened || null,
+      full: draft.messages.full || null,
+      canceled: draft.messages.canceled || null,
+    },
     teams: Object.entries(draft.teams).reduce((acc, [key, users]) => {
       return {
         ...acc,
@@ -110,14 +130,13 @@ export async function deserializeDraft(
     hostId: data.hostId,
     location: data.location,
     skipSignupPing: data.skipSignupPing,
+    openPool: data.openPool,
     time: data.time,
   })
 
   draft.id = docId
   draft.date = data.date.toDate()
-  draft.hasSentSignupPing = data.hasSentSignupPing
-  draft.embedMessageId = data.embedMessageId
-  draft.signupMessageId = data.signupMessageId
+  draft.messages = data.messages
 
   const users = data.users.map((user) => membersCollection.get(user.id)?.user).filter((u) => u)
 
@@ -148,6 +167,7 @@ export class Draft {
   guildId: string
   hostId: string
   location: string
+  openPool: boolean
   skipSignupPing: boolean
   time: string | null
 
@@ -155,20 +175,23 @@ export class Draft {
   id?: string
   canceledAt: Date | null = null
   date: Date = new Date()
-  hasSentSignupPing: boolean = false
-  embedMessageId: string | null = null
+  messages: {
+    embed?: string | null
+    opened?: string | null
+    full?: string | null
+    canceled?: string | null
+  } = {}
   settings: Settings | null = null
-  signupMessageId: string | null = null
   teams: { [k: number]: User[] } = {}
   users: User[] = []
   usersLog: LogUser[] = []
 
-  signupTimer?: NodeJS.Timeout
-  updateUserLogTimer?: NodeJS.Timeout
+  openedTimer?: NodeJS.Timeout
+  fullTimer?: NodeJS.Timeout
+  userLogTimer?: NodeJS.Timeout
   saveTimer?: NodeJS.Timeout
   interaction?: CommandInteraction
   updateEmbedMessageDebounced: () => void = () => {}
-  sendPingDebounced: (string: string) => void = () => {}
 
   constructor({
     hostId,
@@ -179,7 +202,7 @@ export class Draft {
     count = defaultPlayerCount,
     description = '',
     skipSignupPing = false,
-    interaction,
+    openPool = false,
   }: DraftOptions) {
     const now = new Date()
     let date = time ? zonedTimeToUtc(parseTime(time), 'Europe/Paris') : now
@@ -194,25 +217,20 @@ export class Draft {
     this.guildId = guildId
     this.hostId = hostId
     this.location = location
+    this.openPool = openPool
     this.skipSignupPing = skipSignupPing
     this.time = time
-    this.interaction = interaction
 
     this.updateEmbedMessageDebounced = debounce(this.updateEmbedMessage, secondsToMilliseconds(5), {
       leading: true,
       trailing: true,
-    })
-
-    this.sendPingDebounced = debounce(this.sendSignupPing, minutesToMilliseconds(15), {
-      leading: false,
-      trailing: false,
     })
   }
 
   public async initializeNewDraft() {
     await this.loadSettings()
     await this.initializeTimers()
-    await this.scheduleSignupPing()
+    await this.scheduleOpenedMessage()
     await this.sendEmbedMessage()
     await this.save()
   }
@@ -221,12 +239,6 @@ export class Draft {
     await this.loadSettings()
     await this.initializeTimers()
     await this.collectInteractions()
-  }
-
-  private initializeTimers() {
-    this.updateUserLogTimer = setInterval(() => this.updateUserLog(), secondsToMilliseconds(1))
-
-    this.saveTimer = setInterval(() => this.save(false), minutesToMilliseconds(5))
   }
 
   public get guild(): Guild | undefined {
@@ -245,6 +257,12 @@ export class Draft {
     return subHours(this.date, 1)
   }
 
+  private initializeTimers() {
+    this.userLogTimer = setInterval(() => this.updateUserLog(), secondsToMilliseconds(1))
+
+    this.saveTimer = setInterval(() => this.save(false), minutesToMilliseconds(5))
+  }
+
   private get isPastSignupTime() {
     return new Date() > this.signupDate
   }
@@ -257,13 +275,13 @@ export class Draft {
     return this.users.slice(0, this.count)
   }
 
-  private scheduleSignupPing() {
+  private scheduleOpenedMessage() {
     const diff = differenceInMilliseconds(new Date(), this.signupDate)
 
     const timeout = diff < 0 ? Math.abs(diff) : 0
 
-    this.signupTimer = setTimeout(
-      () => this.sendSignupPing('Sign-ups are open, register now!'),
+    this.openedTimer = setTimeout(
+      () => this.sendOpenedMessage('Sign-ups are open, register now!'),
       timeout,
     )
   }
@@ -284,7 +302,7 @@ export class Draft {
     }
   }
 
-  private async getMessage(id: string | null) {
+  private async getMessage(id?: string | null) {
     if (this.guild && id) {
       return await getMessage(this.guild, this.channelId, id)
     }
@@ -329,7 +347,9 @@ export class Draft {
 
       const ign = doc?.ign ? ` (${doc.ign})` : ''
 
-      const str = `${divider(i)}${i + 1}. ${user.nickname}${ign}`
+      const str = this.openPool
+        ? `- ${user.nickname}${ign}`
+        : `${divider(i)}${i + 1}. ${user.nickname}${ign}`
 
       signups.push(str.replace(/_/g, '\\_'))
     }
@@ -349,14 +369,20 @@ export class Draft {
 
     embed.addField('Meeting Location', this.location)
 
+    embed.addField(
+      'Draft Type',
+      this.openPool
+        ? 'Open Pool - Captains can pick anyone'
+        : 'Closed Pool - Captains can pick from the first 16',
+    )
+
     if (this.description) {
       embed.addField('Description', this.description)
     }
 
     embed
-      .addField('Player Count', String(this.count))
+      .addField('Player Count', `${this.users.length} / ${this.count}`)
       .addField('Host', `<@${this.hostId}>`)
-      .addField('\u200b', '-----')
       .addField('Signups', `${signups.length ? signups.join('\n') : 'None'}`)
 
     Object.keys(this.teams)
@@ -374,13 +400,59 @@ export class Draft {
     return embed
   }
 
-  private async sendSignupPing(content: string) {
+  private async sendEmbedMessage() {
+    if (!this.channel?.isText()) {
+      throw new Error('Draft must be created in a text channel')
+    }
+
+    const embed = await this.createEmbed()
+
+    const msg = await this.channel.send({
+      content: `A draft has been ${this.time ? 'scheduled' : 'created'}`,
+      embeds: [embed],
+      components: [this.createComponents()],
+    })
+
+    if (msg) {
+      this.messages.embed = msg.id
+
+      this.collectInteractions()
+    }
+  }
+
+  private async updateEmbedMessage() {
+    try {
+      const message = await this.getMessage(this.messages.embed)
+
+      if (message?.editable) {
+        const embed = await this.createEmbed()
+
+        if (this.canceledAt) {
+          await message?.edit({
+            content: 'The draft has been canceled',
+            embeds: [],
+            components: [],
+          })
+        } else {
+          await message?.edit({
+            embeds: [embed],
+            components: [this.createComponents()],
+          })
+        }
+      }
+    } catch (e) {
+      console.log('Failed to update message')
+      console.log(e)
+    }
+  }
+
+  private async sendOpenedMessage(content: string) {
     if (!this.settings?.draft_player_role || this.skipSignupPing) {
       return
     }
 
-    if (this.signupMessageId) {
-      const msg = await this.getMessage(this.signupMessageId)
+    if (this.messages.opened) {
+      const msg = await this.getMessage(this.messages.opened)
 
       if (msg?.deletable) {
         msg.delete()
@@ -388,20 +460,104 @@ export class Draft {
     }
 
     try {
-      const signupMsg = await this.channel?.send(
+      const openedMessage = await this.channel?.send(
         `${content} <@&${this.settings.draft_player_role}>`,
       )
 
-      this.signupMessageId = signupMsg?.id || null
+      this.messages.opened = openedMessage?.id || null
 
       this.save()
     } catch (e) {
-      console.log(`Failed to send sign-up notification message to  #${this.channel?.name}`)
+      console.log(`Failed to send opened message to ${this.channel?.name}`)
+      console.log(e)
+    }
+  }
+
+  private async sendFullMessage() {
+    if (!this.settings?.draft_player_role || this.skipSignupPing || this.messages.full) {
+      return
+    }
+
+    try {
+      const fullMsg = await this.channel?.send(
+        `The draft has enough players, please come to ${this.location} <@&${this.settings.draft_player_role}>`,
+      )
+
+      this.messages.full = fullMsg?.id || null
+
+      this.save()
+    } catch (e) {
+      console.log(`Failed to send draft full message to ${this.channel?.name}`)
+      console.log(e)
+    }
+  }
+
+  private createUserLog() {
+    const log = this.usersLog.map((u, i) => {
+      const did = intervalToDuration({ start: 0, end: u.durationInDraft })
+      const dic = intervalToDuration({ start: 0, end: u.durationInCount })
+      const f = (n: number = 0) => String(n).padStart(2, '0')
+
+      return [
+        `${i + 1}.`,
+        u.nickname || u.username,
+        `${f(did.hours)}:${f(did.minutes)}`,
+        `${f(dic.hours)}:${f(dic.minutes)}`,
+      ]
+    })
+
+    const t = table(
+      [['', 'Name', '     In Draft', '     In Count'], ['', '', '', '', ''], ...log],
+      {
+        align: ['l', 'l', 'r', 'r'],
+      },
+    )
+
+    return '```' + t + '```'
+  }
+
+  private async sendCanceledMessage() {
+    const draftDuration = intervalToDuration({
+      start: 0,
+      end: differenceInMilliseconds(new Date(), this.date),
+    })
+
+    const content = [
+      `Draft has been canceled after ${formatDuration(draftDuration, {
+        format: ['hours', 'minutes'],
+      })}`,
+    ]
+
+    if (this.usersLog.length > 0) {
+      content.push(this.createUserLog())
+    }
+
+    try {
+      const canceledMsg = await this.channel?.send({ content: content.join('\n') })
+
+      if (canceledMsg) {
+        this.messages.canceled = canceledMsg.id
+      }
+
+      setTimeout(() => {
+        try {
+          canceledMsg?.deletable && canceledMsg.delete()
+        } catch (e) {
+          console.log('Could not delete canceled message')
+          console.log(e)
+        }
+      }, minutesToMilliseconds(60))
+    } catch (e) {
+      console.log(`Failed to send canceled message to ${this.channel?.name}`)
       console.log(e)
     }
   }
 
   private updateUserLog() {
+    if (!this.isPastStartTime) {
+      return
+    }
+
     this.users.forEach((u) => {
       const log = this.usersLog.find((ul) => ul.id === u.id)
 
@@ -416,7 +572,7 @@ export class Draft {
   }
 
   private async collectInteractions() {
-    const message = await this.getMessage(this.embedMessageId)
+    const message = await this.getMessage(this.messages.embed)
 
     if (message) {
       const collector = message.createMessageComponentCollector({
@@ -443,52 +599,6 @@ export class Draft {
           }
         }
       })
-    }
-  }
-
-  private async sendEmbedMessage() {
-    if (!this.channel?.isText()) {
-      throw new Error('Draft must be created in a text channel')
-    }
-
-    const embed = await this.createEmbed()
-
-    const msg = await this.channel.send({
-      content: `A draft has been ${this.time ? 'scheduled' : 'created'}`,
-      embeds: [embed],
-      components: [this.createComponents()],
-    })
-
-    if (msg) {
-      this.embedMessageId = msg.id
-
-      this.collectInteractions()
-    }
-  }
-
-  private async updateEmbedMessage() {
-    try {
-      const message = await this.getMessage(this.embedMessageId)
-
-      if (message?.editable) {
-        const embed = await this.createEmbed()
-
-        if (this.canceledAt) {
-          await message?.edit({
-            content: 'The draft has been canceled',
-            embeds: [],
-            components: [],
-          })
-        } else {
-          await message?.edit({
-            embeds: [embed],
-            components: [this.createComponents()],
-          })
-        }
-      }
-    } catch (e) {
-      console.log('Failed to update message')
-      console.log(e)
     }
   }
 
@@ -537,6 +647,10 @@ export class Draft {
       }
     }
 
+    if (this.users.length >= this.count && !this.fullTimer) {
+      this.fullTimer = setTimeout(() => this.sendFullMessage(), minutesToMilliseconds(3))
+    }
+
     this.save()
   }
 
@@ -548,6 +662,12 @@ export class Draft {
         const team = parseInt(key, 10)
         this.teams[team] = this.teams[team]?.filter((u) => u.id !== user.id) ?? []
       })
+    }
+
+    if (this.users.length < this.count) {
+      clearTimeout(this.fullTimer)
+
+      this.fullTimer = undefined
     }
 
     this.save()
@@ -614,24 +734,34 @@ export class Draft {
   }
 
   public async cancel() {
-    clearTimeout(this.signupTimer || undefined)
+    clearTimeout(this.openedTimer || undefined)
 
-    clearTimeout(this.updateUserLogTimer || undefined)
+    clearTimeout(this.userLogTimer || undefined)
 
-    const message = await this.getMessage(this.embedMessageId)
+    clearTimeout(this.fullTimer || undefined)
 
-    const signupMessage = await this.getMessage(this.signupMessageId)
+    const embedMessage = await this.getMessage(this.messages.embed)
+
+    const openedMessage = await this.getMessage(this.messages.opened)
+
+    const fullMsg = await this.getMessage(this.messages.full)
+
+    await this.sendCanceledMessage()
 
     this.canceledAt = new Date()
 
     this.save(false)
 
-    if (message?.deletable) {
-      await message.delete()
+    if (embedMessage?.deletable) {
+      embedMessage.delete()
     }
 
-    if (signupMessage?.deletable) {
-      await signupMessage.delete()
+    if (openedMessage?.deletable) {
+      openedMessage.delete()
+    }
+
+    if (fullMsg?.deletable) {
+      fullMsg.delete()
     }
   }
 
@@ -658,7 +788,12 @@ export class Draft {
     }
   }
 
-  public async edit(host: DiscordUser | null, location: string | null, description: string | null) {
+  public async edit(
+    host: DiscordUser | null,
+    location: string | null,
+    description: string | null,
+    openPool: boolean | null,
+  ) {
     if (host) {
       this.hostId = host.id
     }
@@ -671,6 +806,10 @@ export class Draft {
       this.description = description
     }
 
+    if (openPool !== null) {
+      this.openPool = openPool
+    }
+
     this.save()
   }
 
@@ -678,5 +817,15 @@ export class Draft {
     this.teams = {}
 
     this.save()
+  }
+
+  public async winner(team: number) {
+    if (team === 1) {
+      this.teams[1].forEach((u) => addWinToPlayer(u.id))
+      this.teams[2].forEach((u) => addLossToPlayer(u.id))
+    } else if (team === 2) {
+      this.teams[1].forEach((u) => addLossToPlayer(u.id))
+      this.teams[2].forEach((u) => addWinToPlayer(u.id))
+    }
   }
 }

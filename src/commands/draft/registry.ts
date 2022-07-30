@@ -58,7 +58,7 @@ export async function loadExistingDrafts(client: Client) {
         if (data.canceledAt) {
           console.log(`The draft in ${guild.name} has been canceled`)
         } else {
-          const msg = await getMessage(guild, data.channelId, data.embedMessageId)
+          const msg = await getMessage(guild, data.channelId, data.messages.embed)
 
           if (msg) {
             const draft = await deserializeDraft(guild, doc.id, data)

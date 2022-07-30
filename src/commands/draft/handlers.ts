@@ -1,14 +1,5 @@
-import {
-  addMilliseconds,
-  differenceInMilliseconds,
-  formatDuration,
-  intervalToDuration,
-  isBefore,
-  minutesToMilliseconds,
-} from 'date-fns'
 import { CommandInteraction, User } from 'discord.js'
-import table from 'text-table'
-import { addLossToPlayer, addWinToPlayer, getGuildSettings } from '../../firebase'
+import { getGuildSettings } from '../../firebase'
 import { userHasRole } from '../permissions'
 import { Draft } from './draft'
 import { addDraft, getDraft, removeDraft } from './registry'
@@ -53,6 +44,7 @@ export async function handleDraftCreate(i: CommandInteraction) {
     const count = i.options.getInteger('count') || 16
     const description = i.options.getString('description') || ''
     const skipSignupPing = i.options.getBoolean('skip_signup_ping') || false
+    const openPool = i.options.getBoolean('open_pool') || false
 
     if (i.guildId) {
       try {
@@ -66,6 +58,7 @@ export async function handleDraftCreate(i: CommandInteraction) {
           hostId: i.user.id,
           location,
           skipSignupPing,
+          openPool,
           time,
           interaction: i, // TODO can we remove this ref?
         })
@@ -127,31 +120,12 @@ export async function handleDraftWinner(i: CommandInteraction) {
     i.reply({ content: 'Invalid guild id', ephemeral: true })
   } else if (!draft) {
     i.reply({ content: 'There is no active draft', ephemeral: true })
-  } else if (
-    winnerTimestamps[i.guildId] &&
-    isBefore(new Date(), addMilliseconds(winnerTimestamps[i.guildId], winnerWaitTime))
-  ) {
-    i.reply({ content: 'A winner has been declared recently, please wait', ephemeral: true })
   } else {
     const team = i.options.getInteger('team', true)
 
-    if (team === 1) {
-      draft.teams[1].forEach((u) => addWinToPlayer(u.id))
-      draft.teams[2].forEach((u) => addLossToPlayer(u.id))
-    } else if (team === 2) {
-      draft.teams[1].forEach((u) => addLossToPlayer(u.id))
-      draft.teams[2].forEach((u) => addWinToPlayer(u.id))
-    }
+    draft.winner(team)
 
-    if (i.guildId) {
-      winnerTimestamps[i.guildId] = new Date()
-    }
-
-    await i.reply({ content: `Team ${team} declared the winner!` })
-
-    setTimeout(() => {
-      i.deleteReply()
-    }, winnerWaitTime)
+    await i.reply({ content: `Team ${team} declared the winner!`, ephemeral: true })
   }
 }
 
@@ -162,6 +136,7 @@ export async function handleDraftEdit(i: CommandInteraction) {
     i.options.getUser('host'),
     i.options.getString('location'),
     i.options.getString('description'),
+    i.options.getBoolean('open_pool'),
   )
 
   await i.reply({ content: `Draft edited`, ephemeral: true })
@@ -179,43 +154,7 @@ export async function handleDraftCancel(i: CommandInteraction) {
 
     await removeDraft(draft)
 
-    const draftDuration = intervalToDuration({
-      start: 0,
-      end: differenceInMilliseconds(new Date(), draft.date),
-    })
-
-    function format(d: Duration): string {
-      return `${d.hours}:${(d.minutes || 0) < 10 ? '0' : ''}${d.minutes}`
-    }
-
-    const content = [`Draft has been canceled after ${formatDuration(draftDuration)}`]
-
-    if (draft.usersLog.length > 0) {
-      const log = draft.usersLog.map((u, i) => {
-        return [
-          `${i + 1}.`,
-          u.nickname || u.username,
-          format(intervalToDuration({ start: 0, end: u.durationInDraft })),
-          format(intervalToDuration({ start: 0, end: u.durationInCount })),
-          `${((u.durationInCount / u.durationInDraft) * 100).toFixed(0)}%`,
-        ]
-      })
-
-      const t = table([
-        ['', 'Name', 'In Draft', 'In Count', '% In Count'],
-        ['', '', '', '', ''],
-        ...log,
-      ])
-
-      content.push('The following players joined the draft:')
-
-      content.push('```' + t + '```')
-    }
-
-    await i.reply({ content: content.join('\n\n') })
-
-    const ic = i
-    setTimeout(() => ic.deleteReply().catch((e) => console.log(e)), minutesToMilliseconds(60))
+    await i.reply({ content: 'You have cancelled the draft', ephemeral: true })
   } else {
     await i.reply({ content: `There is no active draft to cancel`, ephemeral: true })
   }

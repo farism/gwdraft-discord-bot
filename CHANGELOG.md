@@ -1,10 +1,14 @@
+v0.6.0
+
+- signup full ping now mentions all users in the count
+
 v0.5.0
 
 - Count field now shows #players in draft / 16
-- Added a field to the embed for Draft Type, which shows either "Open Pool" or "Closed Pool"
+- Added a field to the embed displaying "Draft Type", which shows either "Open Pool" or "Closed Pool"
 - Added `open_pool` flag to `/draft create` and `/draft edit`.
 - A one time ping goes out after player count has been full for at least 3 minutes
-- Cleaned up embed a bit and user log table
+- Cleaned up embed and the user log table a bit
 
 v0.4.0
 

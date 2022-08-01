@@ -478,9 +478,11 @@ export class Draft {
       return
     }
 
+    const mentions = this.usersInCount.map((u) => `<@${u.id}>`).join(' ')
+
     try {
       const fullMsg = await this.channel?.send(
-        `The draft has enough players, please come to ${this.location} <@&${this.settings.draft_player_role}>`,
+        `The draft has enough players, please come to ${this.location} <@&${this.settings.draft_player_role}> ${mentions}`,
       )
 
       this.messages.full = fullMsg?.id || null
@@ -648,7 +650,7 @@ export class Draft {
     }
 
     if (this.users.length >= this.count && !this.fullTimer) {
-      this.fullTimer = setTimeout(() => this.sendFullMessage(), minutesToMilliseconds(3))
+      this.fullTimer = setTimeout(() => this.sendFullMessage(), minutesToMilliseconds(1))
     }
 
     this.save()

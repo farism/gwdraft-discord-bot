@@ -1,3 +1,7 @@
+v0.7.0
+
+- bump discord.js lib to latest v13
+
 v0.6.0
 
 - signup full ping now mentions all users in the count

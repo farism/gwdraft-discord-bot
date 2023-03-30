@@ -191,7 +191,7 @@ export class Draft {
   userLogTimer?: NodeJS.Timeout
   saveTimer?: NodeJS.Timeout
   interaction?: CommandInteraction
-  updateEmbedMessageDebounced: () => void = () => {}
+  updateEmbedMessageDebounced: () => void = () => { }
 
   constructor({
     hostId,

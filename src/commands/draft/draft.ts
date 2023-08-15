@@ -260,7 +260,7 @@ export class Draft {
   private initializeTimers() {
     this.userLogTimer = setInterval(() => this.updateUserLog(), secondsToMilliseconds(1))
 
-    this.saveTimer = setInterval(() => this.save(false), minutesToMilliseconds(5))
+    // this.saveTimer = setInterval(() => this.save(false), minutesToMilliseconds(5))
   }
 
   private get isPastSignupTime() {

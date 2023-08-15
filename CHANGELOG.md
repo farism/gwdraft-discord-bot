@@ -1,3 +1,7 @@
+v0.8.0
+
+- remove save timer
+
 v0.7.0
 
 - bump discord.js lib to latest v13

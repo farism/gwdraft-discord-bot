@@ -1,12 +1,25 @@
 import { CommandInteraction, User } from 'discord.js'
-import { getGuildSettings } from '../../firebase'
+import { bans, getGuildSettings } from '../../firebase'
 import { userHasRole } from '../permissions'
 import { Draft } from './draft'
 import { addDraft, getDraft, removeDraft } from './registry'
 
-const winnerWaitTime = 3 * 60 * 1000
+export async function isDraftModerator(i: CommandInteraction) {
+  const guildSettings = await getGuildSettings(i.guildId)
 
-const winnerTimestamps: { [k: string]: Date } = {}
+  const hasRole = guildSettings?.draft_moderator_role
+    ? userHasRole(i.guild, i.user.id, guildSettings?.draft_moderator_role || '')
+    : true
+
+  if (!hasRole) {
+    await i.reply({
+      content: `You do not have the <@&${guildSettings?.draft_moderator_role}> role`,
+      ephemeral: true,
+    })
+  }
+
+  return hasRole
+}
 
 export async function handleDraftCreate(i: CommandInteraction) {
   if (getDraft(i)) {
@@ -18,22 +31,19 @@ export async function handleDraftCreate(i: CommandInteraction) {
     return
   }
 
-  const guildSettings = await getGuildSettings(i.guildId)
 
-  const hasRole = guildSettings?.draft_moderator_role
-    ? userHasRole(i.guild, i.user.id, guildSettings?.draft_moderator_role || '')
-    : true
+  if (!await isDraftModerator(i)) {
+    return
+  }
+
+  const guildSettings = await getGuildSettings(i.guildId)
 
   const isInDraftChannel = guildSettings?.draft_channel
     ? guildSettings.draft_channel === i.channel?.id
     : true
 
-  if (!hasRole) {
-    await i.reply({
-      content: `You do not have the <@&${guildSettings?.draft_moderator_role}> role`,
-      ephemeral: true,
-    })
-  } else if (!isInDraftChannel) {
+
+  if (!isInDraftChannel) {
     await i.reply({
       content: `Invalid channel, please use <#${guildSettings?.draft_channel}>`,
       ephemeral: true,
@@ -157,5 +167,51 @@ export async function handleDraftCancel(i: CommandInteraction) {
     await i.reply({ content: 'You have cancelled the draft', ephemeral: true })
   } else {
     await i.reply({ content: `There is no active draft to cancel`, ephemeral: true })
+  }
+}
+
+export async function handleDraftBan(i: CommandInteraction) {
+  const user = i.options.getUser('user')
+
+  if (await isDraftModerator(i) && i.guildId && user) {
+    const doc = await bans.doc(i.guildId)
+    const data = await (await doc.get()).data()
+    const users = data ? data.users : []
+    users.push({ id: user.id, username: user.username, date: new Date(), moderator: i.user.username })
+    doc.set({ users })
+
+    await i.reply({ content: `You have banned ${user.username}`, ephemeral: true })
+  }
+}
+
+export async function handleDraftUnban(i: CommandInteraction) {
+  const user = i.options.getUser('user')
+
+  if (await isDraftModerator(i) && i.guildId && user) {
+    const doc = await bans.doc(i.guildId)
+    const data = await (await doc.get()).data()
+    const users = data ? data.users : []
+    doc.set({ users: users.filter((u: any) => u.id !== user.id) })
+
+    await i.reply({ content: `You have unbanned the ${user.username}`, ephemeral: true })
+  }
+}
+
+export async function handleDraftBanList(i: CommandInteraction) {
+  if (await isDraftModerator(i) && i.guildId) {
+    const doc = await (await bans.doc(i.guildId).get()).data()
+    const users = doc ? (doc.users || []) : []
+
+    if (users.length) {
+      const userList = users.map((u: any) => `username - ${u.username}\nban date - ${u.date.toDate()}`)
+      const userListStr = userList.join('\n--------------------------------------------------------------\n')
+
+      await i.reply({
+        content: `The following players have been banned:\n\n${userListStr}`,
+        ephemeral: true
+      })
+    } else {
+      await i.reply({ content: 'No players have been banned', ephemeral: true })
+    }
   }
 }

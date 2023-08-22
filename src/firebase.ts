@@ -1,4 +1,3 @@
-import { CommandInteraction } from 'discord.js'
 import { applicationDefault, initializeApp } from 'firebase-admin/app'
 import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { Player, Rankings } from './types'
@@ -8,6 +7,8 @@ initializeApp({
 })
 
 const db = getFirestore()
+
+export const bans = db.collection('bans')
 
 export const drafts = db.collection('drafts')
 
@@ -78,15 +79,3 @@ export async function addLossToPlayer(id: string) {
     console.log(e)
   }
 }
-
-// players.onSnapshot((snapshot) => {
-//   for (const doc of snapshot.docs) {
-//     console.log(doc.data())
-//   }
-// })
-
-// settings.onSnapshot((snapshot) => {
-//   snapshot.docs.forEach((d) => {
-//     console.log(d.data())
-//   })
-// })

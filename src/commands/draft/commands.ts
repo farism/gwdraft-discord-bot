@@ -177,5 +177,35 @@ export const draftCmd = new SlashCommandBuilder()
       ),
   )
   .addSubcommand((subcommand) =>
+    subcommand
+      .setName('ban')
+
+      .setDescription('Ban a player')
+      .addUserOption((option) =>
+        // prettier-ignore
+        option
+          .setName('user')
+          .setDescription('The player to ban')
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName('unban')
+      .setDescription('Unban a player')
+      .addUserOption((option) =>
+        // prettier-ignore
+        option
+          .setName('user')
+          .setDescription('The player to ban')
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName('banlist')
+      .setDescription('List all banned players')
+  )
+  .addSubcommand((subcommand) =>
     subcommand.setName('cancel').setDescription('Cancel the current draft'),
   )

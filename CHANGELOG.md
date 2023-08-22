@@ -1,3 +1,9 @@
+v0.9.0
+
+- add `/draft ban <user>` command - prevents user from joining drafts
+- add `/draft unban <user>` command
+- add `/draft banlist` command
+
 v0.8.0
 
 - remove save timer

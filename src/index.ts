@@ -35,7 +35,7 @@ async function handleInteractions(i: Interaction) {
 }
 
 // handle commands
-;(async () => {
+; (async () => {
   await setupClient(async (client) => {
     await loadExistingDrafts(client)
 

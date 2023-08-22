@@ -8,6 +8,9 @@ import {
   handleDraftRemovePlayers,
   handleDraftReorderPlayer,
   handleDraftWinner,
+  handleDraftBan,
+  handleDraftUnban,
+  handleDraftBanList,
 } from './draft/handlers'
 import { handlePlayerIgn, handlePlayerStats } from './player/handlers'
 import {
@@ -51,6 +54,9 @@ export function getInteractionHandler(i: CommandInteraction) {
     draft_winner: handleDraftWinner,
     draft_edit: handleDraftEdit,
     draft_cancel: handleDraftCancel,
+    draft_ban: handleDraftBan,
+    draft_unban: handleDraftUnban,
+    draft_banlist: handleDraftBanList,
 
     team_captain: handleTeamCaptain,
     team_pick: handleTeamPick,

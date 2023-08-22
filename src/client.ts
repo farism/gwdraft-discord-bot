@@ -30,6 +30,7 @@ export async function setupClient(onReady: (client: Client) => void) {
     console.log('Updating application slash commands...')
 
     rest
+      // .put(Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID, '999443708934107226'), { body: commands })
       .put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID), { body: commands })
       .then(() => {
         console.log('Successfully updated application slash commands')

@@ -24,6 +24,7 @@ import { client } from '../../client'
 import {
   addLossToPlayer,
   addWinToPlayer,
+  bans,
   drafts,
   getGuildSettings,
   players,
@@ -587,9 +588,13 @@ export class Draft {
           if (this.isUserInDraft(i.user)) {
             await i.reply({ content: `You have already joined the draft`, ephemeral: true })
           } else {
-            await this.addUsers(i.user)
+            if (await this.isUserBanned(i.user.id)) {
+              await i.reply({ content: `You are banned from drafts!`, ephemeral: true })
+            } else {
+              await this.addUsers(i.user)
 
-            await i.reply({ content: `You have joined the draft!`, ephemeral: true })
+              await i.reply({ content: `You have joined the draft!`, ephemeral: true })
+            }
           }
         } else if (i.customId === 'leave') {
           if (this.isUserInDraft(i.user)) {
@@ -602,6 +607,13 @@ export class Draft {
         }
       })
     }
+  }
+
+  public async isUserBanned(id: string) {
+    const doc = await (await bans.doc(this.guildId).get()).data() || {}
+    const users = doc.users || []
+
+    return users.some((u: any) => u.id === id)
   }
 
   public isUserInDraft(user: User) {

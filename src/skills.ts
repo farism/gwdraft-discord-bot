@@ -1,4 +1,4 @@
-import { createCanvas, loadImage, Canvas, Image } from 'canvas'
+// import { createCanvas, loadImage, Canvas, Image } from 'canvas'
 import path from 'path'
 const skillsMapById = require('../assets/skillsMapById.json')
 
@@ -321,43 +321,43 @@ export function encodeSkillbar(skillbar: Exclude<Skillbar, 'template'>): string 
   return bintocode(template.join(''))
 }
 
-export async function skillbarToImage(skillbar: Skillbar): Promise<Canvas> {
-  const canvas = createCanvas(8 * IMAGE_SIZE, IMAGE_SIZE)
-  const ctx = canvas.getContext('2d')
-  const hex = await loadImage(path.join(ASSETS_DIR, 'images', 'skill-hex.png'))
-  const enchantment = await loadImage(path.join(ASSETS_DIR, 'images', 'skill-enchantment.png'))
-  const types: string[] = []
-  const promises: Promise<Image>[] = []
+// export async function skillbarToImage(skillbar: Skillbar): Promise<Canvas> {
+//   const canvas = createCanvas(8 * IMAGE_SIZE, IMAGE_SIZE)
+//   const ctx = canvas.getContext('2d')
+//   const hex = await loadImage(path.join(ASSETS_DIR, 'images', 'skill-hex.png'))
+//   const enchantment = await loadImage(path.join(ASSETS_DIR, 'images', 'skill-enchantment.png'))
+//   const types: string[] = []
+//   const promises: Promise<Image>[] = []
 
-  skillbar.skills.forEach((skill: any, i) => {
-    types.push(skill?.type)
+//   skillbar.skills.forEach((skill: any, i) => {
+//     types.push(skill?.type)
 
-    promises.push(loadImage(path.join(ASSETS_DIR, 'images', 'skills', `${skill?.id || 0}.jpg`)))
-  })
+//     promises.push(loadImage(path.join(ASSETS_DIR, 'images', 'skills', `${skill?.id || 0}.jpg`)))
+//   })
 
-  try {
-    const images = await Promise.all(promises)
+//   try {
+//     const images = await Promise.all(promises)
 
-    images.forEach((img, i) => {
-      ctx.drawImage(img, i * IMAGE_SIZE, 0, IMAGE_SIZE, IMAGE_SIZE)
+//     images.forEach((img, i) => {
+//       ctx.drawImage(img, i * IMAGE_SIZE, 0, IMAGE_SIZE, IMAGE_SIZE)
 
-      if (types[i]?.includes('Hex')) {
-        ctx.drawImage(hex, i * IMAGE_SIZE + IMAGE_SIZE - 22, 2, 20, 19)
-      } else if (types[i]?.includes('Enchantment')) {
-        ctx.drawImage(enchantment, i * IMAGE_SIZE + IMAGE_SIZE - 22, 2, 20, 19)
-      }
+//       if (types[i]?.includes('Hex')) {
+//         ctx.drawImage(hex, i * IMAGE_SIZE + IMAGE_SIZE - 22, 2, 20, 19)
+//       } else if (types[i]?.includes('Enchantment')) {
+//         ctx.drawImage(enchantment, i * IMAGE_SIZE + IMAGE_SIZE - 22, 2, 20, 19)
+//       }
 
-      ctx.fillStyle = 'rgba(50, 50, 50, 0.9)'
-      ctx.fillRect(i * IMAGE_SIZE + IMAGE_SIZE - 18, IMAGE_SIZE - 18, 18, 18)
+//       ctx.fillStyle = 'rgba(50, 50, 50, 0.9)'
+//       ctx.fillRect(i * IMAGE_SIZE + IMAGE_SIZE - 18, IMAGE_SIZE - 18, 18, 18)
 
-      ctx.font = '14px Arial'
-      ctx.fillStyle = 'white'
-      ctx.shadowColor
-      ctx.fillText(String(i + 1), i * IMAGE_SIZE + IMAGE_SIZE - 12, IMAGE_SIZE - 4)
-    })
-  } catch (e) {
-    console.error(e)
-  }
+//       ctx.font = '14px Arial'
+//       ctx.fillStyle = 'white'
+//       ctx.shadowColor
+//       ctx.fillText(String(i + 1), i * IMAGE_SIZE + IMAGE_SIZE - 12, IMAGE_SIZE - 4)
+//     })
+//   } catch (e) {
+//     console.error(e)
+//   }
 
-  return canvas
-}
+//   return canvas
+// }
